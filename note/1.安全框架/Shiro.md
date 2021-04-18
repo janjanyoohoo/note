@@ -128,7 +128,7 @@ CacheManager缓存管理，将用户权限数据存储在缓存，这样可以�
 Cryptography密码管理，shiro提供了一套加密/解密的组件，方便开发。比如提供常用的散列、加/解密等功能
 ```
 
-## Shiro入门与概念
+## 概念
 
 ### 认证流程
 
@@ -268,7 +268,7 @@ public class MyRealm{
    3. 匹配失败则会抛出new AuthenticationException异常
    4. 匹配成功抛出new IncorrectCredentialsException(msg);
 
-## 登录源码流程
+## 登录流程
 
 1. 当调用Sbuject.login(token)后,会交给SecurityManage进行登录
    1. 会找到DefaultSecurityManager的login调用父类authenticate(token)方法
@@ -284,4 +284,226 @@ public class MyRealm{
    7. 查询到info信息,则会调用notifySuccess方法,并返回info
 
 
+
+## 身份授权流程
+
+1. 当Subject调用 后交给SercurityManage
+
+   * hasRole("角色代码")  返回值boolean
+
+   * checkRole("角色代码")   不存在则抛出异常
+   * isPermitted("权限代码") 返回值boolean
+   * checkPermitted("权限代码") 不存在则抛出异常
+
+2. SercurityManage调用Authorizer的hasRole(subjectPrincipal,roleIdentifier)
+
+3. 最终会通过缓存获取,如果缓存获取不到,则会通过我们实现类的doGetAuthorizationInfo()获取;
+
+
+
+# SpringBoot 集成Shiro
+
+## 自定义Realm
+
+![image-20210418215616874](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210418215624.png)
+
+#### * 原理分析
+
+- ShiroDbRealmImpl继承ShiroDbRealm向上继承AuthorizingRealm，ShiroDbRealmImpl实例化时会创建密码匹配器HashedCredentialsMatcher实例，HashedCredentialsMatcher指定hash次数与方式，交于AuthenticatingRealm
+
+- 调用login方法后，最终调用doGetAuthenticationInfo(AuthenticationToken authcToken)方法，拿到自定义Token的对象，调用自定义Service的查找用户方法，把ShiroUser对象、密码和salt交于SimpleAuthenticationInfo去认证
+
+- 访问需要鉴权时，调用doGetAuthorizationInfo(PrincipalCollection principals)方法，然后调用自定义Service的授权验证 
+
+## ShiroConfig
+
+![image-20210418215929789](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210418215929.png)
+
+* #### 原理分析
+
+  - 创建SimpleCookie对象，访问项目时，会在客户端中cookie中存放ShiroSession的对象
+
+  * 创建DefaultWebSessionManager会话管理器定义cookie机制、定时刷新、全局会话超时时间然后交于DefaultWebSecurityManager权限管理器管理
+  * 创建自定义ShiroDbRealm实现，用于权限认证、授权、加密方式的管理，同时从数据库中取得相关的角色、资源、用户的信息，然后交于DefaultWebSecurityManager权限管理器管理
+  * 创建DefaultWebSecurityManager权限管理器用于管理DefaultWebSessionManager会话管理器、ShiroDbRealm
+  * 创建lifecycleBeanPostProcessor和DefaultAdvisorAutoProxyCreator相互配合事项注解的权限鉴权
+  * 创建ShiroFilterFactoryBean的shiro过滤器指定权限管理器、同时启动连接链及登录URL、未登录的URL
+
+### DefaultSecurityMannage
+
+继承关系,集成了缓存,认证,授权等SecurityMannage,默认实现DefaultSecurityMannage即可
+
+![image-20210418221020656](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210418221020.png)
+
+### 自定义过滤器
+
+* 实现AuthrizatoionFilter接口,重写isAccsessAllowed()方法
+* 定义map:
+  * key - String 为过滤器的名称
+  * value - Filter: 传入自定义Filter对象
+* ShiroFilterFactoryBean类方法setFilters(定义的map); 
+* 返回ShiroFilterFactoryBean对象,交给IOC管理;即可
+
+```java
+/**
+ * @Description Shiro过滤器
+ */
+@Bean("shiroFilter")
+public ShiroFilterFactoryBean shiroFilterFactoryBean(){
+    //过滤器
+    ShiroFilterFactoryBean shiroFilter = new ShiroFilterFactoryBean();
+    shiroFilter.setSecurityManager(defaultWebSecurityManager());
+    //设置配置文件中的过滤器链  此方法的接收 k,v 都是String类型的过滤器链
+    shiroFilter.setFilterChainDefinitionMap(filterChainDefinition());
+    
+    /*自定义过滤器
+     *实现AuthrizatoionFilter接口,重写isAccsessAllowed()方法
+     *定义map:
+     *key - String 为过滤器的名称
+     *value - Filter: 传入自定义Filter对象
+     *ShiroFilterFactoryBean类方法setFilters(定义的map); 即可
+     */
+    //登录路径
+    shiroFilter.setLoginUrl("/login");
+    //未授权时跳转的路径
+    shiroFilter.setUnauthorizedUrl("/login");
+    return shiroFilter;
+}
+```
+
+### Shiro配置代码
+
+``` java
+/**
+ * @Description：权限配置类
+ */
+@Configuration
+@ComponentScan(basePackages = "com.jianjian.shiro")
+@Log4j2
+public class ShiroConfig {
+
+    /**
+     * @Description 创建cookie对象
+     */
+    @Bean(name="sessionIdCookie")
+    public SimpleCookie simpleCookie(){
+        //生产cookie的对象,shiro提供
+        SimpleCookie simpleCookie = new SimpleCookie();
+        simpleCookie.setName("ShiroSession");
+        return simpleCookie;
+    }
+
+    /**
+     * @Description 权限管理器
+     */
+    @Bean(name="securityManager")
+    public DefaultWebSecurityManager defaultWebSecurityManager(){
+        DefaultWebSecurityManager securityManager = new DefaultWebSecurityManager();
+        //设置领域
+        securityManager.setRealm(shiroDbRealm());
+        //设置session管理器
+        securityManager.setSessionManager(shiroSessionManager());
+        return securityManager;
+    }
+
+    /**
+     * @Description 自定义RealmImpl,并交给IOC管理
+     */
+    @Bean(name="shiroDbRealm")
+    public ShiroDbRealm shiroDbRealm(){
+        return new ShiroDbRealmImpl();
+    }
+
+
+    /**
+     * @Description 会话管理器
+     */
+    @Bean(name="sessionManager")
+    public DefaultWebSessionManager shiroSessionManager(){
+        DefaultWebSessionManager sessionManager = new DefaultWebSessionManager();
+        //关闭会话更新
+        sessionManager.setSessionValidationSchedulerEnabled(false);
+        //开启cookie
+        sessionManager.setSessionIdCookieEnabled(true);
+        //指定生产cookie的策略
+        sessionManager.setSessionIdCookie(simpleCookie());
+        //会话超时时间
+        sessionManager.setGlobalSessionTimeout(3600000);
+        return sessionManager;
+    }
+
+    /**
+     * @Description 保证实现了Shiro内部lifecycle函数的bean执行
+     * static 保证LifecycleBeanPostProcessor优先被实例化能够读取配置文件中的配置
+     */
+    @Bean(name = "lifecycleBeanPostProcessor")
+    public static LifecycleBeanPostProcessor getLifecycleBeanPostProcessor() {
+        return new LifecycleBeanPostProcessor();
+    }
+
+    /**
+     * @Description AOP式方法级权限检查
+     *  依赖于LifecycleBeanPostProcessor生命周期对象;
+     */
+    @Bean
+    @DependsOn("lifecycleBeanPostProcessor")
+    public DefaultAdvisorAutoProxyCreator getDefaultAdvisorAutoProxyCreator() {
+        DefaultAdvisorAutoProxyCreator defaultAdvisorAutoProxyCreator = new DefaultAdvisorAutoProxyCreator();
+        defaultAdvisorAutoProxyCreator.setProxyTargetClass(true);
+        return defaultAdvisorAutoProxyCreator;
+    }
+
+    /**
+     * @Description 配合DefaultAdvisorAutoProxyCreator开启事项注解权限校验
+     */
+    @Bean
+    public AuthorizationAttributeSourceAdvisor getAuthorizationAttributeSourceAdvisor() {
+        AuthorizationAttributeSourceAdvisor aasa = new AuthorizationAttributeSourceAdvisor();
+        aasa.setSecurityManager(defaultWebSecurityManager());
+        return new AuthorizationAttributeSourceAdvisor();
+    }
+
+
+    /**
+     * @Description Shiro过滤器
+     */
+    @Bean("shiroFilter")
+    public ShiroFilterFactoryBean shiroFilterFactoryBean(){
+        //过滤器
+        ShiroFilterFactoryBean shiroFilter = new ShiroFilterFactoryBean();
+        shiroFilter.setSecurityManager(defaultWebSecurityManager());
+        //设置配置文件中的过滤器链  此方法的接收 k,v 都是String类型的过滤器链
+        shiroFilter.setFilterChainDefinitionMap(filterChainDefinition());
+        
+        /*自定义过滤器
+         *实现AuthrizatoionFilter接口,重写isAccsessAllowed()方法
+         *定义map:
+         *key - String 为过滤器的名称
+         *value - Filter: 传入自定义Filter对象
+         *ShiroFilterFactoryBean类方法setFilters(定义的map); 即可
+         */
+        //登录路径
+        shiroFilter.setLoginUrl("/login");
+        //未授权时跳转的路径
+        shiroFilter.setUnauthorizedUrl("/login");
+        return shiroFilter;
+    }
+    
+    /**
+     * @Description 过滤器链  (此方法为工具方法)
+     */
+    private Map<String, String> filterChainDefinition(){
+        List<Object> list  = PropertiesUtil.propertiesShiro.getKeyList();
+        Map<String, String> map = new LinkedHashMap<>();
+        for (Object object : list) {
+            String key = object.toString();
+            String value = PropertiesUtil.getShiroValue(key);
+            log.info("读取防止盗链控制：---key{},---value:{}",key,value);
+            map.put(key, value);
+        }
+        return map;
+    }
+}
+
+```
 
