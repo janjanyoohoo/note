@@ -335,6 +335,54 @@ public class MyRealm{
 
 ![image-20210418221020656](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210418221020.png)
 
+### 过滤器
+
+* Shiro在枚举中提供了很多的默认过滤器
+
+```java
+public enum DefaultFilter {
+
+    anon(AnonymousFilter.class),
+    authc(FormAuthenticationFilter.class),
+    authcBasic(BasicHttpAuthenticationFilter.class),
+    logout(LogoutFilter.class),
+    noSessionCreation(NoSessionCreationFilter.class),
+    perms(PermissionsAuthorizationFilter.class),
+    port(PortFilter.class),
+    rest(HttpMethodPermissionFilter.class),
+    roles(RolesAuthorizationFilter.class),
+    ssl(SslFilter.class),
+    user(UserFilter.class);
+}
+```
+
+#### 【1】认证相关
+
+| 过滤器 | 过滤器类                 | 说明                                                         | 默认 |
+| ------ | ------------------------ | ------------------------------------------------------------ | ---- |
+| authc  | FormAuthenticationFilter | 基于表单的过滤器；如“/**=authc”，如果没有登录会跳到相应的登录页面登录 | 无   |
+| logout | LogoutFilter             | 退出过滤器，主要属性：redirectUrl：退出成功后重定向的地址，如“/logout=logout” | /    |
+| anon   | AnonymousFilter          | 匿名过滤器，即不需要登录即可访问；一般用于静态资源过滤；示例“/static/**=anon” | 无   |
+
+#### 【2】授权相关
+
+| 过滤器 | 过滤器类                       | 说明                                                         | 默认 |
+| ------ | ------------------------------ | ------------------------------------------------------------ | ---- |
+| roles  | RolesAuthorizationFilter       | 角色授权拦截器，验证用户是否拥有所有角色；主要属性： loginUrl：登录页面地址（/login.jsp）；unauthorizedUrl：未授权后重定向的地址；示例“/admin/**=roles[admin]” | 无   |
+| perms  | PermissionsAuthorizationFilter | 权限授权拦截器，验证用户是否拥有所有权限；属性和roles一样；示例“/user/**=perms["user:create"]” | 无   |
+| port   | PortFilter                     | 端口拦截器，主要属性：port（80）：可以通过的端口；示例“/test= port[80]”，如果用户访问该页面是非80，将自动将请求端口改为80并重定向到该80端口，其他路径/参数等都一样 | 无   |
+| rest   | HttpMethodPermissionFilter     | rest风格拦截器，自动根据请求方法构建权限字符串（GET=read, POST=create,PUT=update,DELETE=delete,HEAD=read,TRACE=read,OPTIONS=read, MKCOL=create）构建权限字符串；示例“/users=rest[user]”，会自动拼出“user:read,user:create,user:update,user:delete”权限字符串进行权限匹配（所有都得匹配，isPermittedAll） | 无   |
+| ssl    | SslFilter                      | SSL拦截器，只有请求协议是https才能通过；否则自动跳转会https端口（443）；其他和port拦截器一样； |      |
+
+* Shiro的过滤器配置是自上而下顺序的,如果匹配了第一个过滤器则不会再向下匹配
+
+<img src="https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210419224439.png" alt="image-20210419224439634" style="zoom: 67%;" />
+
+* 在创建ShiroFilterFactoryBean时,构造方法初始化了一个过滤器,和过滤器链 的 LinkedHashMap集合
+* ShiroFilterFactoryBean类createFilterChainManager方法其内部方法自动加载默认的过滤器
+  * 加载完成默认过滤器后,会加载一个全局配置
+  * 加载完全局配置后,会加载过滤器链
+
 ### 自定义过滤器
 
 * 实现AuthrizatoionFilter接口,重写isAccsessAllowed()方法
