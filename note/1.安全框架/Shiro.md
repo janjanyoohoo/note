@@ -303,11 +303,11 @@ public class MyRealm{
 
 # SpringBoot 集成Shiro
 
-## 自定义Realm
+## Realm
 
 ![image-20210418215616874](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210418215624.png)
 
-#### * 原理分析
+#### 原理分析
 
 - ShiroDbRealmImpl继承ShiroDbRealm向上继承AuthorizingRealm，ShiroDbRealmImpl实例化时会创建密码匹配器HashedCredentialsMatcher实例，HashedCredentialsMatcher指定hash次数与方式，交于AuthenticatingRealm
 
@@ -335,93 +335,7 @@ public class MyRealm{
 
 ![image-20210418221020656](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210418221020.png)
 
-### 过滤器
-
-* Shiro在枚举中提供了很多的默认过滤器
-
 ```java
-public enum DefaultFilter {
-
-    anon(AnonymousFilter.class),
-    authc(FormAuthenticationFilter.class),
-    authcBasic(BasicHttpAuthenticationFilter.class),
-    logout(LogoutFilter.class),
-    noSessionCreation(NoSessionCreationFilter.class),
-    perms(PermissionsAuthorizationFilter.class),
-    port(PortFilter.class),
-    rest(HttpMethodPermissionFilter.class),
-    roles(RolesAuthorizationFilter.class),
-    ssl(SslFilter.class),
-    user(UserFilter.class);
-}
-```
-
-#### 【1】认证相关
-
-| 过滤器 | 过滤器类                 | 说明                                                         | 默认 |
-| ------ | ------------------------ | ------------------------------------------------------------ | ---- |
-| authc  | FormAuthenticationFilter | 基于表单的过滤器；如“/**=authc”，如果没有登录会跳到相应的登录页面登录 | 无   |
-| logout | LogoutFilter             | 退出过滤器，主要属性：redirectUrl：退出成功后重定向的地址，如“/logout=logout” | /    |
-| anon   | AnonymousFilter          | 匿名过滤器，即不需要登录即可访问；一般用于静态资源过滤；示例“/static/**=anon” | 无   |
-
-#### 【2】授权相关
-
-| 过滤器 | 过滤器类                       | 说明                                                         | 默认 |
-| ------ | ------------------------------ | ------------------------------------------------------------ | ---- |
-| roles  | RolesAuthorizationFilter       | 角色授权拦截器，验证用户是否拥有所有角色；主要属性： loginUrl：登录页面地址（/login.jsp）；unauthorizedUrl：未授权后重定向的地址；示例“/admin/**=roles[admin]” | 无   |
-| perms  | PermissionsAuthorizationFilter | 权限授权拦截器，验证用户是否拥有所有权限；属性和roles一样；示例“/user/**=perms["user:create"]” | 无   |
-| port   | PortFilter                     | 端口拦截器，主要属性：port（80）：可以通过的端口；示例“/test= port[80]”，如果用户访问该页面是非80，将自动将请求端口改为80并重定向到该80端口，其他路径/参数等都一样 | 无   |
-| rest   | HttpMethodPermissionFilter     | rest风格拦截器，自动根据请求方法构建权限字符串（GET=read, POST=create,PUT=update,DELETE=delete,HEAD=read,TRACE=read,OPTIONS=read, MKCOL=create）构建权限字符串；示例“/users=rest[user]”，会自动拼出“user:read,user:create,user:update,user:delete”权限字符串进行权限匹配（所有都得匹配，isPermittedAll） | 无   |
-| ssl    | SslFilter                      | SSL拦截器，只有请求协议是https才能通过；否则自动跳转会https端口（443）；其他和port拦截器一样； |      |
-
-* Shiro的过滤器配置是自上而下顺序的,如果匹配了第一个过滤器则不会再向下匹配
-
-<img src="https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210419224439.png" alt="image-20210419224439634" style="zoom: 67%;" />
-
-* 在创建ShiroFilterFactoryBean时,构造方法初始化了一个过滤器,和过滤器链 的 LinkedHashMap集合
-* ShiroFilterFactoryBean类createFilterChainManager方法其内部方法自动加载默认的过滤器
-  * 加载完成默认过滤器后,会加载一个全局配置
-  * 加载完全局配置后,会加载过滤器链
-
-### 自定义过滤器
-
-* 实现AuthrizatoionFilter接口,重写isAccsessAllowed()方法
-* 定义map:
-  * key - String 为过滤器的名称
-  * value - Filter: 传入自定义Filter对象
-* ShiroFilterFactoryBean类方法setFilters(定义的map); 
-* 返回ShiroFilterFactoryBean对象,交给IOC管理;即可
-
-```java
-/**
- * @Description Shiro过滤器
- */
-@Bean("shiroFilter")
-public ShiroFilterFactoryBean shiroFilterFactoryBean(){
-    //过滤器
-    ShiroFilterFactoryBean shiroFilter = new ShiroFilterFactoryBean();
-    shiroFilter.setSecurityManager(defaultWebSecurityManager());
-    //设置配置文件中的过滤器链  此方法的接收 k,v 都是String类型的过滤器链
-    shiroFilter.setFilterChainDefinitionMap(filterChainDefinition());
-    
-    /*自定义过滤器
-     *实现AuthrizatoionFilter接口,重写isAccsessAllowed()方法
-     *定义map:
-     *key - String 为过滤器的名称
-     *value - Filter: 传入自定义Filter对象
-     *ShiroFilterFactoryBean类方法setFilters(定义的map); 即可
-     */
-    //登录路径
-    shiroFilter.setLoginUrl("/login");
-    //未授权时跳转的路径
-    shiroFilter.setUnauthorizedUrl("/login");
-    return shiroFilter;
-}
-```
-
-### Shiro配置代码
-
-``` java
 /**
  * @Description：权限配置类
  */
@@ -459,6 +373,10 @@ public class ShiroConfig {
      */
     @Bean(name="shiroDbRealm")
     public ShiroDbRealm shiroDbRealm(){
+        //Realm可以指定缓存管理器
+        //shiroDbRealm realm = new shiroDbRealm();
+        //只有本地缓存EhCache才需要开启,整合Redisson不需要这样
+        //Cache实现类方法,是在代码中已经存在的过程,所以不需要开启
         return new ShiroDbRealmImpl();
     }
 
@@ -494,7 +412,7 @@ public class ShiroConfig {
      *  依赖于LifecycleBeanPostProcessor生命周期对象;
      */
     @Bean
-    @DependsOn("lifecycleBeanPostProcessor")
+    @DependsOn("defaultAdvisorAutoProxyCreator")
     public DefaultAdvisorAutoProxyCreator getDefaultAdvisorAutoProxyCreator() {
         DefaultAdvisorAutoProxyCreator defaultAdvisorAutoProxyCreator = new DefaultAdvisorAutoProxyCreator();
         defaultAdvisorAutoProxyCreator.setProxyTargetClass(true);
@@ -554,4 +472,806 @@ public class ShiroConfig {
 }
 
 ```
+
+
+
+## 过滤器
+
+* Shiro在枚举中提供了很多的默认过滤器
+
+```java
+public enum DefaultFilter {
+
+    anon(AnonymousFilter.class),
+    authc(FormAuthenticationFilter.class),
+    authcBasic(BasicHttpAuthenticationFilter.class),
+    logout(LogoutFilter.class),
+    noSessionCreation(NoSessionCreationFilter.class),
+    perms(PermissionsAuthorizationFilter.class),
+    port(PortFilter.class),
+    rest(HttpMethodPermissionFilter.class),
+    roles(RolesAuthorizationFilter.class),
+    ssl(SslFilter.class),
+    user(UserFilter.class);
+}
+```
+
+#### 【1】认证相关
+
+| 过滤器 | 过滤器类                 | 说明                                                         | 默认 |
+| ------ | ------------------------ | ------------------------------------------------------------ | ---- |
+| authc  | FormAuthenticationFilter | 基于表单的过滤器；如“/**=authc”，如果没有登录会跳到相应的登录页面登录 | 无   |
+| logout | LogoutFilter             | 退出过滤器，主要属性：redirectUrl：退出成功后重定向的地址，如“/logout=logout” | /    |
+| anon   | AnonymousFilter          | 匿名过滤器，即不需要登录即可访问；一般用于静态资源过滤；示例“/static/**=anon” | 无   |
+
+#### 【2】授权相关
+
+| 过滤器 | 过滤器类                       | 说明                                                         | 默认 |
+| ------ | ------------------------------ | ------------------------------------------------------------ | ---- |
+| roles  | RolesAuthorizationFilter       | 角色授权拦截器，验证用户是否拥有所有角色；主要属性： loginUrl：登录页面地址（/login.jsp）；unauthorizedUrl：未授权后重定向的地址；示例“/admin/**=roles[admin]” | 无   |
+| perms  | PermissionsAuthorizationFilter | 权限授权拦截器，验证用户是否拥有所有权限；属性和roles一样；示例“/user/**=perms["user:create"]” | 无   |
+| port   | PortFilter                     | 端口拦截器，主要属性：port（80）：可以通过的端口；示例“/test= port[80]”，如果用户访问该页面是非80，将自动将请求端口改为80并重定向到该80端口，其他路径/参数等都一样 | 无   |
+| rest   | HttpMethodPermissionFilter     | rest风格拦截器，自动根据请求方法构建权限字符串（GET=read, POST=create,PUT=update,DELETE=delete,HEAD=read,TRACE=read,OPTIONS=read, MKCOL=create）构建权限字符串；示例“/users=rest[user]”，会自动拼出“user:read,user:create,user:update,user:delete”权限字符串进行权限匹配（所有都得匹配，isPermittedAll） | 无   |
+| ssl    | SslFilter                      | SSL拦截器，只有请求协议是https才能通过；否则自动跳转会https端口（443）；其他和port拦截器一样； |      |
+
+* Shiro的过滤器配置是自上而下顺序的,如果匹配了第一个过滤器则不会再向下匹配
+
+<img src="https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210419224439.png" alt="image-20210419224439634" style="zoom: 67%;" />
+
+* 在创建ShiroFilterFactoryBean时,构造方法初始化了一个过滤器,和过滤器链 的 LinkedHashMap集合
+* ShiroFilterFactoryBean类createFilterChainManager方法其内部方法自动加载默认的过滤器
+  * 加载完成默认过滤器后,会加载一个全局配置
+  * 加载完全局配置后,会加载过滤器链
+
+### 自定义过滤器
+
+#### 定义
+
+* 实现AuthrizatoionFilter接口,重写isAccsessAllowed()方法
+* 定义map:
+  * key - String 为过滤器的名称
+  * value - Filter: 传入自定义Filter对象
+* ShiroFilterFactoryBean类方法setFilters(定义的map); 
+* 返回ShiroFilterFactoryBean对象,交给IOC管理;即可
+
+```java
+    protected boolean isAccessAllowed(ServletRequest request, ServletResponse response, Object mappedValue) {
+        try {
+            if (this.isWhiteList(request)) {
+                return true;
+            } else if (this.isLoginAttempt(request, response)) {
+                try {
+                    this.executeLogin(request, response);
+                    return true;
+                } catch (Exception var7) {
+                    log.error("execute login error.", var7);
+                    String msg = var7.getMessage();
+                    Throwable throwable = var7.getCause();
+                    if (throwable instanceof SignatureVerificationException) {
+                        msg = String.format("Token或者密钥不正确(%s)", throwable.getMessage());
+                    } else if (throwable instanceof TokenExpiredException) {
+                        msg = String.format("Token已过期(%s)", throwable.getMessage());
+                    } else if (throwable != null) {
+                        msg = "un know error";
+                    }
+
+                    throw new ApplicationException(HttpStatus.UNAUTHORIZED.value(), msg);
+                }
+            } else {
+                return false;
+            }
+        } catch (Throwable var8) {
+            throw var8;
+        }
+    }
+
+```
+
+#### 使用
+
+```java
+/**
+ * @Description Shiro过滤器
+ */
+@Bean("shiroFilter")
+public ShiroFilterFactoryBean shiroFilterFactoryBean(){
+    //过滤器
+    ShiroFilterFactoryBean shiroFilter = new ShiroFilterFactoryBean();
+    shiroFilter.setSecurityManager(defaultWebSecurityManager());
+    //设置配置文件中的过滤器链  此方法的接收 k,v 都是String类型的过滤器链
+    shiroFilter.setFilterChainDefinitionMap(filterChainDefinition());
+    
+    /*自定义过滤器
+     *实现AuthrizatoionFilter接口,重写isAccsessAllowed()方法
+     *定义map:
+     *key - String 为过滤器的名称
+     *value - Filter: 传入自定义Filter对象
+     *ShiroFilterFactoryBean类方法setFilters(定义的map); 即可
+     */
+    
+    //登录路径
+    shiroFilter.setLoginUrl("/login");
+    //未授权时跳转的路径
+    shiroFilter.setUnauthorizedUrl("/login");
+    return shiroFilter;
+}
+```
+
+
+
+## 注解方式鉴权
+
+### 注解
+
+**类型:**
+
+* **@RequiresAuthentication** : 当前方法是已经认证过的用户才可以访问的
+* **@RequiresGuest** : 表明当前需要时Guest(匿名)用户
+* **@RequiresPermission** : 表名需要特定权限才可以访问
+* **@RequiresRoles** : 用户需要拥有指定角色才可以访问
+* **@RequiresUser** : 当前已经认证或者记住的角色才可以访问
+
+**作用位置:**
+
+* 在Dao,Service,Controller层都是可以加的,如果需要很高的细粒度可以加在Dao,Service
+* 不需要很高的细粒度则加在Controller层即可
+
+### 源码原理
+
+基于Spring AOP的思想实现的,但是并非使用@Aspect注解
+
+```java
+入口: 在Config配置中
+1. DefaultAdvisorAutoProxyCreator(AOP方法级别权限检查)
+2. AuthorizationAttributeSourceAdvisor(配合DefaultAdvisorAutoProxyCreator实现注解权限校验)
+依靠AuthorizationAttributeSourceAdvisor类配置切面和切入点来实现
+3. AuthorizationAttributeSourceAdvisor继承StaticMethodMatcherPointcutAdvisor类,此类是Spring提供
+
+```
+
+* `DefaultAdvisorAutoProxyCreator`这个类实现了`BeanProcessor`接口,当`ApplicationContext`读取所有的Bean配置信息后，这个类将扫描上下文，寻找所有的`Advistor`(一个`Advisor`是一个切入点和一个通知的组成)，将这些`Advisor`应用到所有符合切入点的Bean中。
+
+```java
+@Configuration
+public class ShiroAnnotationProcessorConfiguration extends AbstractShiroAnnotationProcessorConfiguration{
+    @Bean
+    @DependsOn("lifecycleBeanPostProcessor")
+    protected DefaultAdvisorAutoProxyCreator defaultAdvisorAutoProxyCreator() {
+        return super.defaultAdvisorAutoProxyCreator();
+    }
+
+    @Bean
+    protected AuthorizationAttributeSourceAdvisor authorizationAttributeSourceAdvisor(SecurityManager securityManager) {
+        return super.authorizationAttributeSourceAdvisor(securityManager);
+    }
+
+}
+
+```
+
+* `AuthorizationAttributeSourceAdvisor`继承了`StaticMethodMatcherPointcutAdvisor`，如下代码所示，只匹配五个注解，也就是说只对这五个注解标注的类或者方法增强。`StaticMethodMatcherPointcutAdvisor`是静态方法切点的抽象基类，默认情况下它匹配所有的类。`StaticMethodMatcherPointcut`包括两个主要的子类分别是`NameMatchMethodPointcut`和`AbstractRegexpMethodPointcut`，前者提供简单字符串匹配方法前面，而后者使用正则表达式匹配方法前面。动态方法切点：`DynamicMethodMatcerPointcut`是动态方法切点的抽象基类，默认情况下它匹配所有的类，而且也已经过时，建议使用`DefaultPointcutAdvisor`和`DynamicMethodMatcherPointcut`动态方法代替。另外还需关注构造器中的传入的`AopAllianceAnnotationsAuthorizingMethodInterceptor`。
+
+```java
+public class AuthorizationAttributeSourceAdvisor extends StaticMethodMatcherPointcutAdvisor {
+
+    private static final Logger log = LoggerFactory.getLogger(AuthorizationAttributeSourceAdvisor.class);
+
+    //初始化需要增强的类型
+    private static final Class<? extends Annotation>[] AUTHZ_ANNOTATION_CLASSES =
+            new Class[] {
+                    RequiresPermissions.class, RequiresRoles.class,
+                    RequiresUser.class, RequiresGuest.class, RequiresAuthentication.class
+            };
+
+    protected SecurityManager securityManager = null;
+
+    public AuthorizationAttributeSourceAdvisor() {
+        setAdvice(new AopAllianceAnnotationsAuthorizingMethodInterceptor());
+    }
+
+    public SecurityManager getSecurityManager() {
+        return securityManager;
+    }
+
+    public void setSecurityManager(org.apache.shiro.mgt.SecurityManager securityManager) {
+        this.securityManager = securityManager;
+    }
+	//匹配规则,true则增强
+    public boolean matches(Method method, Class targetClass) {
+        Method m = method;
+
+        if ( isAuthzAnnotationPresent(m) ) {
+            return true;
+        }
+        
+        if ( targetClass != null) {
+            try {
+                m = targetClass.getMethod(m.getName(), m.getParameterTypes());
+                if ( isAuthzAnnotationPresent(m) ) {
+                    return true;
+                }
+            } catch (NoSuchMethodException ignored) {
+                
+            }
+        }
+
+        return false;
+    }
+
+    private boolean isAuthzAnnotationPresent(Method method) {
+        for( Class<? extends Annotation> annClass : AUTHZ_ANNOTATION_CLASSES ) {
+            Annotation a = AnnotationUtils.findAnnotation(method, annClass);
+            if ( a != null ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+}
+```
+
+* `AopAllianceAnnotationsAuthorizingMethodInterceptor`在初始化时，`interceptors`添加了5个方法拦截器(都继承自`AuthorizingAnnotationMethodInterceptor`)，这5个拦截器分别对5种权限验证的方法进行拦截，执行invoke方法。
+
+```java
+public class AopAllianceAnnotationsAuthorizingMethodInterceptor
+        extends AnnotationsAuthorizingMethodInterceptor implements MethodInterceptor {
+
+    public AopAllianceAnnotationsAuthorizingMethodInterceptor() {
+        List<AuthorizingAnnotationMethodInterceptor> interceptors =
+                new ArrayList<AuthorizingAnnotationMethodInterceptor>(5);
+        AnnotationResolver resolver = new SpringAnnotationResolver();
+        
+        interceptors.add(new RoleAnnotationMethodInterceptor(resolver));
+        interceptors.add(new PermissionAnnotationMethodInterceptor(resolver));
+        interceptors.add(new AuthenticatedAnnotationMethodInterceptor(resolver));
+        interceptors.add(new UserAnnotationMethodInterceptor(resolver));
+        interceptors.add(new GuestAnnotationMethodInterceptor(resolver));
+        setMethodInterceptors(interceptors);
+    }
+    //invoke方法核心方法
+    public Object invoke(MethodInvocation methodInvocation) throws Throwable {
+        org.apache.shiro.aop.MethodInvocation mi = createMethodInvocation(methodInvocation);
+        return super.invoke(mi);
+    }
+    ...
+}
+
+```
+
+* `AopAllianceAnnotationsAuthorizingMethodInterceptor`的invoke方法，又会调用超类`AuthorizingMethodInterceptor`的invoke方法，在该方法中先执行assertAuthorized方法，进行权限校验，校验不通过，抛出`AuthorizationException`异常，中断方法；校验通过，则执行`methodInvocation.proceed()`，该方法也就是被拦截并且需要权限校验的方法。
+
+```java
+public abstract class AuthorizingMethodInterceptor extends MethodInterceptorSupport {
+
+    public Object invoke(MethodInvocation methodInvocation) throws Throwable {
+        assertAuthorized(methodInvocation);
+        return methodInvocation.proceed();
+    }
+	//断言方法
+    protected abstract void assertAuthorized(MethodInvocation methodInvocation) throws AuthorizationException;
+}
+
+```
+
+* assertAuthorized方法最终执行的还是`AuthorizingAnnotationMethodInterceptor.assertAuthorized`，而`AuthorizingAnnotationMethodInterceptor`有5个的具体的实现类(`RoleAnnotationMethodInterceptor`, `PermissionAnnotationMethodInterceptor`, `AuthenticatedAnnotationMethodInterceptor`, `UserAnnotationMethodInterceptor`, `GuestAnnotationMethodInterceptor`)。
+
+```java
+public abstract class AnnotationsAuthorizingMethodInterceptor extends 	AuthorizingMethodInterceptor {
+  
+    protected void assertAuthorized(MethodInvocation methodInvocation) throws AuthorizationException {
+        //default implementation just ensures no deny votes are cast:
+        Collection<AuthorizingAnnotationMethodInterceptor> aamis = getMethodInterceptors();
+        if (aamis != null && !aamis.isEmpty()) {
+            for (AuthorizingAnnotationMethodInterceptor aami : aamis) {
+                if (aami.supports(methodInvocation)) {
+                    aami.assertAuthorized(methodInvocation);
+                }
+            }
+        }
+    }
+    ...
+}
+
+```
+
+* 5个的具体的实现类都有对应的Handler处理方法
+* `AuthorizingAnnotationMethodInterceptor`的assertAuthorized，首先从子类获取`AuthorizingAnnotationHandler`，再调用该实现类的`assertAuthorized`方法。
+
+```java
+public abstract class AuthorizingAnnotationMethodInterceptor extends AnnotationMethodInterceptor
+{
+
+    public AuthorizingAnnotationMethodInterceptor( AuthorizingAnnotationHandler handler ) {
+        super(handler);
+    }
+
+    public AuthorizingAnnotationMethodInterceptor( AuthorizingAnnotationHandler handler,
+                                                   AnnotationResolver resolver) {
+        super(handler, resolver);
+    }
+
+    public Object invoke(MethodInvocation methodInvocation) throws Throwable {
+        assertAuthorized(methodInvocation);
+        return methodInvocation.proceed();
+    }
+
+    public void assertAuthorized(MethodInvocation mi) throws AuthorizationException {
+        try {
+            ((AuthorizingAnnotationHandler)getHandler()).assertAuthorized(getAnnotation(mi));
+        }
+        catch(AuthorizationException ae) {
+            if (ae.getCause() == null) ae.initCause(new AuthorizationException("Not authorized to invoke method: " + mi.getMethod()));
+            throw ae;
+        }         
+    }
+}
+
+
+```
+
+* 现在分析其中一种实现类`PermissionAnnotationMethodInterceptor`，也是用的最多的，但是这个类的实际代码很少，很明显上述分析的getHandler在`PermissionAnnotationMethodInterceptor`中返回值为`PermissionAnnotationHandler`。
+
+```java
+public class PermissionAnnotationMethodInterceptor extends AuthorizingAnnotationMethodInterceptor {
+
+    public PermissionAnnotationMethodInterceptor() {
+        super( new PermissionAnnotationHandler() );
+    }
+
+ 	//调用对应Handler处理方法
+    public PermissionAnnotationMethodInterceptor(AnnotationResolver resolver) {
+        super( new PermissionAnnotationHandler(), resolver);
+    }
+}
+
+```
+
+* 在`PermissionAnnotationHandler`类中，终于发现实际的检验逻辑，还是调用的`Subject.checkPermission()`进行校验。
+
+```java
+public class PermissionAnnotationHandler extends AuthorizingAnnotationHandler {
+
+    public PermissionAnnotationHandler() {
+        super(RequiresPermissions.class);
+    }
+
+    protected String[] getAnnotationValue(Annotation a) {
+        RequiresPermissions rpAnnotation = (RequiresPermissions) a;
+        return rpAnnotation.value();
+    }
+	//断言方法, 最终的处理逻辑
+    public void assertAuthorized(Annotation a) throws AuthorizationException {
+        if (!(a instanceof RequiresPermissions)) return;
+
+        RequiresPermissions rpAnnotation = (RequiresPermissions) a;
+        String[] perms = getAnnotationValue(a);
+        Subject subject = getSubject();
+
+        if (perms.length == 1) {
+            subject.checkPermission(perms[0]);
+            return;
+        }
+        if (Logical.AND.equals(rpAnnotation.logical())) {
+            getSubject().checkPermissions(perms);
+            return;
+        }
+        if (Logical.OR.equals(rpAnnotation.logical())) {
+            boolean hasAtLeastOnePermission = false;
+            for (String permission : perms) if (getSubject().isPermitted(permission)) hasAtLeastOnePermission = true;
+            if (!hasAtLeastOnePermission) getSubject().checkPermission(perms[0]);
+            
+        }
+    }
+}
+
+
+```
+
+### 自定义实现注解的理解
+
+使用模板模式核心的是配置`DefaultAdvisorAutoProxyCreator`和继承`StaticMethodMatcherPointcutAdvisor`。其中的5中权限注解，使用了统一一套代码架构，用到了的模板模式，方便扩展。
+
+* `DefaultAdvisorAutoProxyCreator`类会自动找到IOC中的所有Advisor
+  * 我们配置了StaticMethodMatcherPointcutAdvisor便是一个Advisor
+  * 然后会将Advisor(一个`Advisor`是一个切入点和一个通知的组成)，将这些`Advisor`应用到所有符合切入点的Bean中。
+
+- StaticMethodMatcherPointcutAdvisor这是一个Advisor,
+  - 方法setAdvice定义了通知类(Adivce)
+  - 重写了matche,返回true的bena或method都会被增强,自动创建代理对象
+
+- 实现MethodInterceptor接口,重写invoke ,spring会自动调用器invoke
+
+- 需要配置`DefaultAdvisorAutoProxyCreator`才能够自动创建代理
+
+
+
+#### 自定义
+
+* 定义一个注解
+
+```java
+@Target({ElementType.METHOD})
+@Retention(RetentionPolicy.RUNTIME)
+public @interface Log {
+	String value() default "";
+}
+```
+
+* 核心 继承`StaticMethodMatcherPointcutAdvisor`类，并实现相关的方法。
+
+```java
+@SuppressWarnings("serial")
+@Component
+public class HelloAdvisor extends StaticMethodMatcherPointcutAdvisor{
+	//设置Advice,调用器invoke方法
+    public HelloAdvisor() {
+        setAdvice(new LogMethodInterceptor());
+    }
+	//匹配规则返回true 则需要增强
+    public boolean matches(Method method, Class targetClass) {
+        Method m = method;
+        if ( isAuthzAnnotationPresent(m) ) {
+            return true;
+        }
+
+        if ( targetClass != null) {
+            try {
+                m = targetClass.getMethod(m.getName(), m.getParameterTypes());
+                return isAuthzAnnotationPresent(m);
+            } catch (NoSuchMethodException ignored) {
+               
+            }
+        }
+        return false;
+    }
+	
+    private boolean isAuthzAnnotationPresent(Method method) {
+        Annotation a = AnnotationUtils.findAnnotation(method, Log.class);
+        return a!= null;
+    }
+}
+
+
+```
+
+* 实现`MethodInterceptor`接口，定义切面处理的逻辑
+
+```java
+public class LogMethodInterceptor implements MethodInterceptor{
+
+	public Object invoke(MethodInvocation invocation) throws Throwable {
+		Log log = invocation.getMethod().getAnnotation(Log.class);
+		System.out.println("log: "+log.value());
+		return invocation.proceed();	
+	}
+}
+
+```
+
+* 定义一个测试类，并添加Log注解
+
+```java
+@Component
+public class TestHello {
+
+	@Log("test log")
+	public String say() {
+		return "ss";
+	}
+}
+
+```
+
+* 编写启动类，并且配置`DefaultAdvisorAutoProxyCreator`
+
+```java
+@Configuration
+public class TestBoot {
+
+	public static void main(String[] args) {
+		ApplicationContext ctx = new AnnotationConfigApplicationContext("com.fzsyw.test");	
+		TestHello th = ctx.getBean(TestHello.class);
+		System.out.println(th.say());
+	}
+	
+	@Bean
+	public DefaultAdvisorAutoProxyCreator defaultAdvisorAutoProxyCreator(){
+		DefaultAdvisorAutoProxyCreator da = new DefaultAdvisorAutoProxyCreator();
+		da.setProxyTargetClass(true);
+		return da;
+	}
+}
+
+```
+
+
+
+# Shiro整合缓存
+
+整合Redis存储用户信息,查询用户信息时,优先从缓存查询,不存在则查询数据库,提高效率,降低数据库压力;
+
+### 继承缓存的思路
+
+![image-20210422205826029](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210422205826.png)
+
+### Redisson的集成
+
+引入Redisson的依赖,在配置文件中指定属性,通过Redisson中的Config类构建对应的缓存对象,其中有多种缓存模式;
+
+* 指定Redisson的属性在配置文件中
+* Redisson有单节点与集群模式两种,对应两个实现类
+* 通过Config类,来构造对象;
+
+因为认证,鉴权的使用频率较高,可以使用与业务两套Redis来保证业务Redis的吞吐量;
+
+此处使用的是与业务不同的一套Redis配置
+
+#### 配置Redisson
+
+```java
+/**
+ * @Description  redis配置文件
+ */
+@Data
+@ConfigurationProperties(prefix = "itheima.framework.shiro.redis")
+public class ShiroRedisProperties implements Serializable {
+
+	/**
+	 * redis连接地址
+	 */
+	private String nodes ;
+
+	/**
+	 * 获取连接超时时间
+	 */
+	private int connectTimeout ;
+
+	/**
+	 * 连接池大小
+	 */
+	private int connectPoolSize;
+
+	/**
+	 * 初始化连接数
+	 */
+	private int connectionMinimumidleSize ;
+
+	/**
+	 * 等待数据返回超时时间
+	 */
+	private int timeout ;
+
+	/**
+	 *  全局超时时间
+	 */
+	private long globalSessionTimeout;
+
+}
+```
+
+```java
+    //在shiroConfig中配置缓存
+
+	@Autowired
+    private ShiroRedisProperties shiroRedisProperties;
+
+    /**
+     * @Description redission客户端
+     */
+    @Bean("redissonClientForShiro")
+    public RedissonClient redissonClient() {
+        log.info("=====初始化redissonClientForShiro开始======");
+        String[] nodeList = shiroRedisProperties.getNodes().split(",");
+        Config config = new Config();
+        if (nodeList.length == 1) {
+            //单节点配置
+            config.useSingleServer().setAddress(nodeList[0])
+                    .setConnectTimeout(shiroRedisProperties.getConnectTimeout())
+.setConnectionMinimumIdleSize(shiroRedisProperties.getConnectionMinimumidleSize())
+.setConnectionPoolSize(shiroRedisProperties.getConnectPoolSize()).setTimeout(shiroRedisProperties.getTimeout());
+        } else {
+            //多节点 集群配置
+            config.useClusterServers().addNodeAddress(nodeList)
+                    .setConnectTimeout(shiroRedisProperties.getConnectTimeout())
+.setMasterConnectionMinimumIdleSize(shiroRedisProperties.getConnectionMinimumidleSize())
+.setMasterConnectionPoolSize(shiroRedisProperties.getConnectPoolSize())
+.setTimeout(shiroRedisProperties.getTimeout());
+        }
+        //创建Redisson缓存对象
+        RedissonClient redissonClient =  Redisson.create(config);
+        log.info("=====初始化redissonClientForShiro完成======");
+        return redissonClient;
+    }
+
+```
+
+### 实现Cache
+
+Shiro提供了Cache接口,Shiro默认提供了一个其实现类MapCache,但是并未实现序列化
+
+* 我们需要实现Cache<Object,Object>接口,并实现序列化接口;并重写方法
+* 也可以继承MapCache<K,V>类,并实现序列化接口.可以省去重写部分方法
+
+### 缓存管理工具
+
+工具类,主要用来对缓存中的数据操作,管理
+
+* 此工具类可以作用在UserService查询数据库之前从缓存中查询. 登陆成功后可以通过此方法将用户数据放到缓存中
+
+```java
+//具体实现可根据个人需要制定
+/**
+ * @Description 简单的缓存管理接口
+ */
+public interface SimpleCacheService {
+
+    /**
+     * <b>功能说明：</b>：新增缓存堆到管理器<br>
+     */
+     void createCache(String cacheName, Cache<Object, Object> cache) throws CacheException;
+
+    /**
+     * <b>方法名：</b>：getCache<br>
+     * <b>功能说明：</b>：获取缓存堆<br>
+     */
+     Cache<Object, Object> getCache(String cacheName) throws CacheException;
+
+    /**
+     * <b>方法名：</b>：removeCache<br>
+     * <b>功能说明：</b>：移除缓存堆<br>
+     */
+     void removeCache(String cacheName) throws CacheException;
+
+    /**
+     * <b>方法名：</b>：updateCahce<br>
+     * <b>功能说明：</b>：更新缓存堆<br>
+     */
+     void updateCahce(String cacheName, Cache<Object, Object> cache) throws CacheException;
+}
+
+```
+
+### 缓存清理
+
+用户退出听该清理缓存,否则会产生大量的缓存垃圾.
+
+* 在重写的Realm中覆盖重写父类方法doClearCache(), 在退出时,Shiro会调用此方法
+
+
+
+## 分布式会话
+
+### Session共享
+
+* 所有服务器的session信息都存储到了同一个Redis集群中，即所有的服务都将 Session 的信息存储到 Redis 集群中，无论是对 Session 的注销、更新都会同步到集群中，达到了 Session 共享的目的。
+
+![image-20210422225614064](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210422225614.png)
+
+​	Cookie 保存在客户端浏览器中，而 Session 保存在服务器上。客户端浏览器访问服务器的时候，服务器把客户端信息以某种形式记录在服务器上，这就是 Session。客户端浏览器再次访问时只需要从该 Session 中查找该客户的状态就可以了。
+
+​		在实际工作中我们建议使用外部的缓存设备(包括Redis)来共享 Session，避免单个服务器节点挂掉而影响服务，共享数据都会放到外部缓存容器中
+
+![image-20210422225636252](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210422225636.png)
+
+#### 原理
+
+主要依赖DefaultWebSessionManager来完成Session共享机制,
+
+通过继承AbstractSessionDao类重写方法,并配置到DefaultWebSessionManager来完成
+
+自定义SessionDao类需要配置缓存客户端(Redis)信息
+
+- 在ShiroConfig中配置DefaultWebSessionManager对象
+- 此对象默认使用内存实现类,需要替换成自定义的实现类
+- 自定义的SessionDao需要继承AbstractSessionDao,然后重写方法
+
+#### ShiroCofig
+
+```java
+    /**
+     * @Description 自定义session会话存储的实现类 ，使用Redis来存储共享session，达到分布式部署目的
+     */
+    @Bean("redisSessionDao")
+    public SessionDAO redisSessionDao(){
+        //自定义的sessionDao
+        RedisSessionDao sessionDAO =   new RedisSessionDao();
+        //超时时间
+        sessionDAO.setGlobalSessionTimeout(shiroRedisProperties.getGlobalSessionTimeout());
+        return sessionDAO;
+    }
+
+    /**
+     * @Description 会话管理器
+     */
+    @Bean(name="sessionManager")
+    public DefaultWebSessionManager shiroSessionManager(){
+        //配置
+        DefaultWebSessionManager sessionManager = new DefaultWebSessionManager();
+        //设置自定义的SessionDao
+        sessionManager.setSessionDAO(redisSessionDao());
+        sessionManager.setSessionValidationSchedulerEnabled(false);
+        sessionManager.setSessionIdCookieEnabled(true);
+        sessionManager.setSessionIdCookie(simpleCookie());
+        sessionManager.setGlobalSessionTimeout(shiroRedisProperties.getGlobalSessionTimeout());
+        return sessionManager;
+    }
+```
+
+#### 自定义SessionDao
+
+```java
+package com.itheima.shiro.core.impl;
+
+import com.itheima.shiro.constant.CacheConstant;
+import com.itheima.shiro.utils.ShiroRedissionSerialize;
+import lombok.extern.log4j.Log4j2;
+import org.apache.shiro.session.Session;
+import org.apache.shiro.session.mgt.eis.AbstractSessionDAO;
+import org.redisson.api.RBucket;
+import org.redisson.api.RedissonClient;
+
+import javax.annotation.Resource;
+import java.io.Serializable;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.concurrent.TimeUnit;
+
+/**
+ * @Description 实现shiro session的memcached集中式管理~
+ */
+@Log4j2
+public class RedisSessionDao extends AbstractSessionDAO {
+
+	@Resource(name = "redissonClientForShiro")
+	RedissonClient redissonClient;
+
+	private Long globalSessionTimeout;
+
+	@Override
+	protected Serializable doCreate(Session session) {
+		Serializable sessionId = generateSessionId(session);
+		assignSessionId(session, sessionId);
+//		log.info("=============创建sessionId:{}",sessionId);
+		RBucket<String> sessionIdRBucket = redissonClient.getBucket(CacheConstant.GROUP_CAS+sessionId.toString());
+		sessionIdRBucket.trySet(ShiroRedissionSerialize.serialize(session), globalSessionTimeout, TimeUnit.SECONDS);
+		return sessionId;
+	}
+
+	@Override
+	protected Session doReadSession(Serializable sessionId) {
+		RBucket<String> sessionIdRBucket = redissonClient.getBucket(CacheConstant.GROUP_CAS+sessionId.toString());
+		Session session = (Session) ShiroRedissionSerialize.deserialize(sessionIdRBucket.get());
+//		log.info("=============读取sessionId:{}",session.getId().toString());
+		return session;
+	}
+
+	@Override
+	public void delete(Session session) {
+//		log.info("=============删除sessionId:{}",session.getId().toString());
+		RBucket<String> sessionIdRBucket = redissonClient.getBucket(CacheConstant.GROUP_CAS+session.getId().toString());
+		sessionIdRBucket.delete();
+	}
+
+	@Override
+	public Collection<Session> getActiveSessions() {
+		return Collections.emptySet();  
+	}
+
+	@Override
+	public void update(Session session) {
+		RBucket<String> sessionIdRBucket = redissonClient.getBucket(CacheConstant.GROUP_CAS+session.getId().toString());
+		sessionIdRBucket.set(ShiroRedissionSerialize.serialize(session), globalSessionTimeout, TimeUnit.SECONDS);
+//		log.info("=============修改sessionId:{}",session.getId().toString());
+	}
+
+	public void setGlobalSessionTimeout(Long globalSessionTimeout) {
+		this.globalSessionTimeout = globalSessionTimeout;
+	}
+}
+
+
+```
+
+
 
