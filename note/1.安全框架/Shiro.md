@@ -173,6 +173,8 @@ public class HelloShiro {
 
 ### AuthenticationToken接口
 
+当Subject 调用login()方法时,会传递实现的Token,最终传递到doGetAuthenticationInfo(AuthenticationToken auth) 
+
 该接口是Shiro提供的Token接口,默认有几个实现,也可以自己继承接口实现Token逻辑.
 
 ### Realm接口
@@ -477,6 +479,8 @@ public class ShiroConfig {
 
 ## 过滤器
 
+
+
 * Shiro在枚举中提供了很多的默认过滤器
 
 ```java
@@ -524,6 +528,107 @@ public enum DefaultFilter {
   * 加载完全局配置后,会加载过滤器链
 
 ### 自定义过滤器
+
+自定义过滤器可以继承AccessControlFilter,实现即可,此过滤器下有很多实现类,也可以继承实现类
+
+```java
+//过滤器方法分析
+public abstract class AccessControlFilter extends PathMatchingFilter {
+
+    /**
+     */
+    public static final String DEFAULT_LOGIN_URL = "/login.jsp";
+
+    /**
+     */
+    public static final String GET_METHOD = "GET";
+
+    /**
+     */
+    public static final String POST_METHOD = "POST";
+
+    /**
+     */
+    private String loginUrl = DEFAULT_LOGIN_URL;
+
+    /**
+     */
+    public String getLoginUrl() {
+        return loginUrl;
+    }
+
+    /**
+     */
+    public void setLoginUrl(String loginUrl) {
+        this.loginUrl = loginUrl;
+    }
+
+    /**
+	 * 获取Subject对象
+     */
+    protected Subject getSubject(ServletRequest request, ServletResponse response) {
+        return SecurityUtils.getSubject();
+    }
+
+    /**
+     * 是否拒绝访问
+     */
+    protected abstract boolean isAccessAllowed(ServletRequest request, ServletResponse response, Object mappedValue) throws Exception;
+
+    /**
+     * 拒绝后处理的业务逻辑
+     */
+    protected boolean onAccessDenied(ServletRequest request, ServletResponse response, Object mappedValue) throws Exception {
+        return onAccessDenied(request, response);
+    }
+
+    /**
+     * 拒绝后处理的业务逻辑
+     */
+    protected abstract boolean onAccessDenied(ServletRequest request, ServletResponse response) throws Exception;
+
+    /**
+     * 最初调用的方法,过滤器流程开始的方法
+     * 只要两个方法有一个返回true,则会继续执行后续的逻辑
+     */
+    public boolean onPreHandle(ServletRequest request, ServletResponse response, Object mappedValue) throws Exception {
+        return isAccessAllowed(request, response, mappedValue) || onAccessDenied(request, response, mappedValue);
+    }
+
+    /**
+     *
+     */
+    protected boolean isLoginRequest(ServletRequest request, ServletResponse response) {
+        return pathsMatch(getLoginUrl(), request);
+    }
+
+    /**
+     * 宝UN请
+     */
+    protected void saveRequestAndRedirectToLogin(ServletRequest request, ServletResponse response) throws IOException {
+        saveRequest(request);
+        redirectToLogin(request, response);
+    }
+
+    /**
+     * 保存请求
+     */
+    protected void saveRequest(ServletRequest request) {
+        WebUtils.saveRequest(request);
+    }
+
+    /**
+     * 跳转登录的路径
+     */
+    protected void redirectToLogin(ServletRequest request, ServletResponse response) throws IOException {
+        String loginUrl = getLoginUrl();
+        WebUtils.issueRedirect(request, response, loginUrl);
+    }
+
+}
+```
+
+
 
 #### 定义
 
@@ -1138,11 +1243,25 @@ public interface SimpleCacheService {
 
 * 在重写的Realm中覆盖重写父类方法doClearCache(), 在退出时,Shiro会调用此方法
 
+```java
+    /**
+     * @Description 清理缓存
+     */
+    @Override
+    public void doClearCache(PrincipalCollection principalcollection) {
+        //自定义的缓存管理工具,具体可以自行根据需求实现
+        String sessionId = ShiroUtil.getShiroSessionId();
+        simpleCacheManager.removeCache(CacheConstant.ROLE_KEY+sessionId);
+        simpleCacheManager.removeCache(CacheConstant.RESOURCES_KEY+sessionId);
+        simpleCacheManager.removeCache(CacheConstant.TOKEN+sessionId);
+    }
+```
 
 
-## 分布式会话
 
-### Session共享
+# 分布式会话
+
+## Session共享
 
 * 所有服务器的session信息都存储到了同一个Redis集群中，即所有的服务都将 Session 的信息存储到 Redis 集群中，无论是对 Session 的注销、更新都会同步到集群中，达到了 Session 共享的目的。
 
@@ -1169,7 +1288,18 @@ public interface SimpleCacheService {
 #### ShiroCofig
 
 ```java
+    
     /**
+     * @Description 创建cookie对象
+     */
+    @Bean(name="sessionIdCookie")
+    public SimpleCookie simpleCookie(){
+        //生产cookie的对象,shiro提供
+        SimpleCookie simpleCookie = new SimpleCookie();
+        simpleCookie.setName("ShiroSession");
+        return simpleCookie;
+    }
+	/**
      * @Description 自定义session会话存储的实现类 ，使用Redis来存储共享session，达到分布式部署目的
      */
     @Bean("redisSessionDao")
@@ -1222,47 +1352,59 @@ import java.util.concurrent.TimeUnit;
  */
 @Log4j2
 public class RedisSessionDao extends AbstractSessionDAO {
-
+	/**
+	 * Redis客户端 
+	 */
 	@Resource(name = "redissonClientForShiro")
 	RedissonClient redissonClient;
 
 	private Long globalSessionTimeout;
-
+	/**
+	 * 创建一个唯一SesisonId放入缓存, 并返回
+	 */
 	@Override
 	protected Serializable doCreate(Session session) {
+       //此方法来自AbstractSessionDAO,创建唯一标识的SessionId
 		Serializable sessionId = generateSessionId(session);
+        //为会话指定唯一Sesisonid
 		assignSessionId(session, sessionId);
-//		log.info("=============创建sessionId:{}",sessionId);
-		RBucket<String> sessionIdRBucket = redissonClient.getBucket(CacheConstant.GROUP_CAS+sessionId.toString());
-		sessionIdRBucket.trySet(ShiroRedissionSerialize.serialize(session), globalSessionTimeout, TimeUnit.SECONDS);
+        //从缓存中获取  CacheConstant.GROUP_CAS 为自定义key
+        RBucket<String> sessionIdRBucket = redissonClient.getBucket(CacheConstant.GROUP_CAS+sessionId.toString());
+        sessionIdRBucket.trySet(ShiroRedissionSerialize.serialize(session), globalSessionTimeout, TimeUnit.SECONDS);
 		return sessionId;
 	}
-
+	/**
+	 * 从缓存中读取Sessio
+	 */
 	@Override
 	protected Session doReadSession(Serializable sessionId) {
 		RBucket<String> sessionIdRBucket = redissonClient.getBucket(CacheConstant.GROUP_CAS+sessionId.toString());
 		Session session = (Session) ShiroRedissionSerialize.deserialize(sessionIdRBucket.get());
-//		log.info("=============读取sessionId:{}",session.getId().toString());
 		return session;
 	}
-
+	/**
+	 * 删除Session
+	 */
 	@Override
 	public void delete(Session session) {
-//		log.info("=============删除sessionId:{}",session.getId().toString());
 		RBucket<String> sessionIdRBucket = redissonClient.getBucket(CacheConstant.GROUP_CAS+session.getId().toString());
 		sessionIdRBucket.delete();
 	}
-
+	/**
+	 * 获取活跃的
+	 */
 	@Override
 	public Collection<Session> getActiveSessions() {
+        //暂未实现
 		return Collections.emptySet();  
 	}
-
+	/**
+	 * 更新Session
+	 */
 	@Override
 	public void update(Session session) {
 		RBucket<String> sessionIdRBucket = redissonClient.getBucket(CacheConstant.GROUP_CAS+session.getId().toString());
 		sessionIdRBucket.set(ShiroRedissionSerialize.serialize(session), globalSessionTimeout, TimeUnit.SECONDS);
-//		log.info("=============修改sessionId:{}",session.getId().toString());
 	}
 
 	public void setGlobalSessionTimeout(Long globalSessionTimeout) {
@@ -1272,6 +1414,279 @@ public class RedisSessionDao extends AbstractSessionDAO {
 
 
 ```
+
+# 管理限制
+
+## 限制密码重试次数
+
+使用自定义实现密码比较器,在密码比较器中整合Redission客户端,通过在缓存中设置值标记密码输入错误次数进行限制;
+
+修改Realm配置,初始化修改密码比较器为自定义的密码比较器
+
+### 实现原理
+
+保证原子性：
+
+​		单系统：AtomicLong计数
+
+​		集群系统：RedissionClient提供的RAtomicLong计数
+
+```java
+1、获取系统中是否已有登录次数缓存,缓存对象结构预期为："用户名--登录次数"。
+
+2、如果之前没有登录缓存，则创建一个登录次数缓存。
+
+3、如果缓存次数已经超过限制，则驳回本次登录请求。
+
+4、将缓存记录的登录次数加1,设置指定时间内有效
+
+5、验证用户本次输入的帐号密码，如果登录登录成功，则清除掉登录次数的缓存
+```
+
+AuthenticatingRealm里有比较密码的入口doCredentialsMatch方法
+
+![image-20210424215821384](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210424215821.png)
+
+![image-20210424215830838](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210424215830.png)
+
+### 自定义密码比较器
+
+RAtomicLong是Redisson提供的原子类
+
+```java
+/**
+ * @Description：密码重试比较器
+ */
+public class RetryLimitCredentialsMatcher extends HashedCredentialsMatcher {
+
+    private RedissonClient redissonClient; //整合Redisson
+
+    private static Long RETRY_LIMIT_NUM = 4L; //密码限制次数
+
+    /**
+     * @Description 构造函数
+     * @param hashAlgorithmName 匹配次数
+     */
+    public RetryLimitCredentialsMatcher(String hashAlgorithmName,RedissonClient redissonClient) {
+        super(hashAlgorithmName);
+        this.redissonClient = redissonClient;
+    }
+
+    @Override
+    public boolean doCredentialsMatch(AuthenticationToken token, AuthenticationInfo info) {
+        //获得登录名
+        String loginName = (String) token.getPrincipal();
+        //获得缓存数据
+        RAtomicLong atomicLong = redissonClient.getAtomicLong(loginName);
+        long retryFlag = atomicLong.get();
+        //判断次数
+        if (retryFlag>RETRY_LIMIT_NUM){
+            //超过次数设计10分钟后重试
+            atomicLong.expire(10, TimeUnit.MICROSECONDS);
+            throw new ExcessiveAttemptsException("密码错误5次，请10分钟以后再试");
+        }
+        //累加次数
+        atomicLong.incrementAndGet();
+        atomicLong.expire(10, TimeUnit.MICROSECONDS);
+        //密码校验
+        boolean flag =  super.doCredentialsMatch(token, info);
+        if (flag){
+            //校验成功删除限制
+            atomicLong.delete();
+        }
+        return flag;
+    }
+}
+
+```
+
+#### 重写ShiroDbRealmImpl
+
+修改initCredentialsMatcher方法，使用RetryLimitCredentialsMatcher
+
+```java
+/**
+ * @Description：自定义shiro的实现
+ */
+public class ShiroDbRealmImpl extends ShiroDbRealm {
+
+    @Autowired
+    private UserBridgeService userBridgeService;
+
+    @Autowired
+    private SimpleCacheManager simpleCacheManager;
+
+    @Resource(name = "redissonClientForShiro")
+    private RedissonClient redissonClient;
+
+    /**
+     * @Description 认证方法
+     * @param authcToken 校验传入令牌
+     * @return AuthenticationInfo
+     */
+    @Override
+    public AuthenticationInfo doGetAuthenticationInfo(AuthenticationToken authcToken) {
+        SimpleToken token = (SimpleToken)authcToken;
+        User user  = userBridgeService.findUserByLoginName(token.getUsername());
+        if(EmptyUtil.isNullOrEmpty(user)){
+            throw new UnknownAccountException("账号不存在");
+        }
+        ShiroUser shiroUser = BeanConv.toBean(user, ShiroUser.class);
+        String sessionId = ShiroUserUtil.getShiroSessionId();
+        String cacheKeyResourcesIds = CacheConstant.RESOURCES_KEY_IDS+sessionId;
+        shiroUser.setResourceIds(userBridgeService.findResourcesIdsList(cacheKeyResourcesIds,user.getId()));
+        String salt = user.getSalt();
+        String password = user.getPassWord();
+        return new SimpleAuthenticationInfo(shiroUser, password, ByteSource.Util.bytes(salt), getName());
+    }
+
+    /**
+     * @Description 授权方法
+     * @param principals SimpleAuthenticationInfo对象第一个参数
+     * @return
+     */
+    @Override
+    public AuthorizationInfo doGetAuthorizationInfo(PrincipalCollection principals) {
+        ShiroUser shiroUser = (ShiroUser) principals.getPrimaryPrincipal();
+        return userBridgeService.getAuthorizationInfo(shiroUser);
+    }
+
+    /**
+     * @Description 清理缓存
+     */
+    @Override
+    public void doClearCache(PrincipalCollection principalcollection) {
+        String sessionId = ShiroUtil.getShiroSessionId();
+        simpleCacheManager.removeCache(CacheConstant.ROLE_KEY+sessionId);
+        simpleCacheManager.removeCache(CacheConstant.RESOURCES_KEY+sessionId);
+        simpleCacheManager.removeCache(CacheConstant.TOKEN+sessionId);
+    }
+
+    /**
+     * @Description 加密方式,密码匹配器
+     */
+    @Override
+    public void initCredentialsMatcher() {
+        RetryLimitCredentialsMatcher matcher = new RetryLimitCredentialsMatcher(SuperConstant.HASH_ALGORITHM,redissonClient);
+        matcher.setHashIterations(SuperConstant.HASH_INTERATIONS);
+        setCredentialsMatcher(matcher);
+
+    }
+}
+
+```
+
+## 限制登录人数
+
+一个账号只允许同时一个在线，当账号在其他地方登陆的时候，会踢出前面登陆的账号实现
+
+- 自定义过滤器:继承AccessControlFilter
+
+- 使用redis队列控制账号在线数目
+
+  #### 原理
+
+```properties
+1、只针对登录用户处理，首先判断是否登录
+2、使用RedissionClien创建队列
+3、判断当前sessionId是否存在于此用户的队列=key:登录名 value：多个sessionId
+4、不存在则放入队列尾端==>存入sessionId
+5、判断当前队列大小是否超过限定此账号的可在线人数
+6、超过：
+	*从队列头部拿到用户sessionId
+	*从sessionManger根据sessionId拿到session
+	*从sessionDao中移除session会话 // 删除session时,如果session已过期或失效,则应该对应处理
+7、未超过：放过操作
+```
+
+#### 代码实现
+
+```java
+/**
+ * @Description：
+ */
+@Log4j2
+public class KickedOutAuthorizationFilter extends AccessControlFilter {
+
+    private RedissonClient redissonClient;
+
+    private SessionDAO redisSessionDao;
+
+    private DefaultWebSessionManager sessionManager;
+
+    public KickedOutAuthorizationFilter(RedissonClient redissonClient, SessionDAO redisSessionDao, DefaultWebSessionManager sessionManager) {
+        this.redissonClient = redissonClient;
+        this.redisSessionDao = redisSessionDao;
+        this.sessionManager = sessionManager;
+    }
+
+    @Override
+    protected boolean isAccessAllowed(ServletRequest servletRequest, ServletResponse servletResponse, Object o) throws Exception {
+        return false;
+    }
+
+    @Override
+    protected boolean onAccessDenied(ServletRequest servletRequest, ServletResponse servletResponse) throws Exception {
+        Subject subject = getSubject(servletRequest, servletResponse);
+        if (!subject.isAuthenticated()) {
+            //如果没有登录，直接进行之后的流程
+            return true;
+        }
+        //存放session对象进入队列
+        String sessionId = ShiroUserUtil.getShiroSessionId();
+        String LoginName = ShiroUserUtil.getShiroUser().getLoginName();
+        RDeque<String> queue = redissonClient.getDeque("KickedOutAuthorizationFilter:"+LoginName);
+        //判断sessionId是否存在于此用户的队列中
+        boolean flag = queue.contains(sessionId);
+        if (!flag) {
+            queue.addLast(sessionId);
+        }
+        //如果此时队列大于1，则开始踢人
+        if (queue.size() > 1) {
+            sessionId = queue.getFirst();
+            queue.removeFirst();
+            Session session = null;
+            try {
+                session = sessionManager.getSession(new DefaultSessionKey(sessionId));
+            }catch (UnknownSessionException ex){
+                log.info("session已经失效");
+            }catch (ExpiredSessionException expiredSessionException){
+                log.info("session已经过期");
+            }
+            if (!EmptyUtil.isNullOrEmpty(session)){
+                redisSessionDao.delete(session);
+            }
+        }
+        return true;
+    }
+}
+```
+
+配置ShiroConfig
+
+```java
+/**
+  * @Description 自定义过滤器定义
+  */
+private Map<String, Filter> filters() {
+    Map<String, Filter> map = new HashMap<String, Filter>();
+    map.put("roleOr", new RolesOrAuthorizationFilter());
+    map.put("kickedOut", new KickedOutAuthorizationFilter(redissonClient(), redisSessionDao(), shiroSessionManager()));
+    return map;
+}
+```
+
+# SpringBoot前后分离鉴权
+
+
+
+
+
+
+
+# 分布式统一权限系统
+
+
 
 
 
