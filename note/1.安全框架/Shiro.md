@@ -1678,6 +1678,191 @@ private Map<String, Filter> filters() {
 
 # SpringBoot前后分离鉴权
 
+基于JWT的token解决方案
+
+```java
+1、用户登陆之后，获得此时会话的sessionId,使用JWT根据sessionId颁发签名并设置过期时间(与session过期时间相同)返回token
+
+2、将token保存到客户端本地，并且每次发送请求时都在header上携带JwtToken
+
+3、ShiroSessionManager继承DefaultWebSessionManager，重写getSessionId方法，从header上检测是否携带JwtToken，如果携带，则进行解码JwtToken，使用JwtToken中的jti作为SessionId。
+
+4、重写shiro的默认过滤器，使其支持jwtToken有效期校验、及对JSON的返回支持
+	JwtAuthcFilter:实现是否需要登录的过滤，拒绝时如果header上携带JwtToken,则返回对应json
+	JwtPermsFilter:实现是否有对应资源的过滤，拒绝时如果header上携带JwtToken,则返回对应json
+	JwtRolesFilter:实现是否有对应角色的过滤，拒绝时如果header上携带JwtToken,则返回对应json
+```
+
+## JWT
+
+JWT（JSON WEB TOKEN）：JSON网络令牌，JWT是一个轻便的安全跨平台传输格式，定义了一个紧凑的自包含的方式在不同实体之间安全传输信息（JSON格式）。它是在Web环境下两个实体之间传输数据的一项标准。实际上传输的就是一个字符串。
+
+- 广义上：JWT是一个标准的名称；
+
+- 狭义上：JWT指的就是用来传递的那个token字符串
+
+
+JWT由三部分构成：header（头部）、payload（载荷）和signature（签名）。
+
+1. Header
+
+   存储两个变量
+
+   1. 秘钥（可以用来比对）
+   2. 算法（也就是下面将Header和payload加密成Signature）
+
+2. payload
+
+   存储很多东西，基础信息有如下几个
+
+   1. 签发人，也就是这个“令牌”归属于哪个用户。一般是`userId` 
+   2. 创建时间，也就是这个令牌是什么时候创建的
+   3. 失效时间，也就是这个令牌什么时候失效(session的失效时间)
+   4. 唯一标识(jti)，一般可以使用算法生成一个唯一标识（jti==>sessionId）
+
+3. Signature
+
+   这个是上面两个经过Header中的算法加密生成的，用于比对信息，防止篡改Header和payload
+
+然后将这三个部分的信息经过加密生成一个`JwtToken`的字符串，发送给客户端，客户端保存在本地。当客户端发起请求的时候携带这个到服务端(可以是在`cookie`，可以是在`header`)，在服务端进行验证，我们需要解密对于的payload的内容
+
+## 集成JWT
+
+- 通过配置文件指定签名
+
+```java
+package com.itheima.shiro.config;
+
+import lombok.Data;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
+import java.io.Serializable;
+
+/**
+ * @Description：jw配置文件
+ */
+@Data
+@ConfigurationProperties(prefix = "itheima.framework.jwt")
+public class JwtProperties implements Serializable {
+
+    /**
+     * @Description 签名密码
+     */
+    private String hexEncodedSecretKey;
+}
+```
+
+- JwtUtil
+
+自定义封装Jwt包提供的工具的工具类,负责令牌的颁发、解析、校验
+
+```java
+package com.itheima.shiro.core.impl;
+
+import com.auth0.jwt.JWT;
+import com.auth0.jwt.JWTVerifier;
+import com.auth0.jwt.algorithms.Algorithm;
+import com.itheima.shiro.config.JwtProperties;
+import com.itheima.shiro.utils.EncodesUtil;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtBuilder;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.SignatureAlgorithm;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.stereotype.Service;
+
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
+
+@Service("jwtTokenManager")
+@EnableConfigurationProperties({JwtProperties.class})
+public class JwtTokenManager {
+
+    @Autowired
+    JwtProperties jwtProperties;
+
+
+    /**
+     * @Description 签发令牌
+     *      jwt字符串包括三个部分
+     *        1. header
+     *            -当前字符串的类型，一般都是“JWT”
+     *            -哪种算法加密，“HS256”或者其他的加密算法
+     *            所以一般都是固定的，没有什么变化
+     *        2. payload
+     *            一般有四个最常见的标准字段（下面有）
+     *            iat：签发时间，也就是这个jwt什么时候生成的
+     *            jti：JWT的唯一标识
+     *            iss：签发人，一般都是username或者userId
+     *            exp：过期时间
+     * @param iss 签发人
+     * @param ttlMillis 有效时间
+     * @param claims jwt中存储的一些非隐私信息
+     * @return
+     */
+    public String IssuedToken(String iss, long ttlMillis,String sessionId, Map<String, Object> claims) {
+        if (claims == null) {
+            claims = new HashMap<>();
+        }
+        long nowMillis = System.currentTimeMillis();
+
+        String base64EncodedSecretKey = EncodesUtil.encodeHex(jwtProperties.getBase64EncodedSecretKey().getBytes());
+
+        JwtBuilder builder = Jwts.builder()
+                .setClaims(claims)
+                .setId(sessionId)//2. 这个是JWT的唯一标识，一般设置成唯一的，这个方法可以生成唯一标识,此时存储的为sessionId,登录成功后回写
+                .setIssuedAt(new Date(nowMillis))//1. 这个地方就是以毫秒为单位，换算当前系统时间生成的iat
+                .setSubject(iss)//3. 签发人，也就是JWT是给谁的（逻辑上一般都是username或者userId）
+                .signWith(SignatureAlgorithm.HS256, base64EncodedSecretKey);//这个地方是生成jwt使用的算法和秘钥
+        if (ttlMillis >= 0) {
+            long expMillis = nowMillis + ttlMillis;
+            Date exp = new Date(expMillis);//4. 过期时间，这个也是使用毫秒生成的，使用当前时间+前面传入的持续时间生成
+            builder.setExpiration(exp);
+        }
+        return builder.compact();
+    }
+
+    /**
+     * @Description 解析令牌
+     * @param jwtToken 令牌
+     * @return
+     */
+    public Claims decodeToken(String jwtToken) {
+
+        String base64EncodedSecretKey = EncodesUtil.encodeHex(jwtProperties.getBase64EncodedSecretKey().getBytes());
+
+        // 得到 DefaultJwtParser
+        return Jwts.parser()
+                // 设置签名的秘钥
+                .setSigningKey(base64EncodedSecretKey)
+                // 设置需要解析的 jwt
+                .parseClaimsJws(jwtToken)
+                .getBody();
+    }
+
+    /**
+     * @Description 判断令牌是否合法
+     * @param jwtToken 令牌
+     * @return
+     */
+    public boolean isVerifyToken(String jwtToken) {
+
+        String base64EncodedSecretKey = EncodesUtil.encodeHex(jwtProperties.getBase64EncodedSecretKey().getBytes());
+
+        //这个是官方的校验规则，这里只写了一个”校验算法“，可以自己加
+        Algorithm algorithm = Algorithm.HMAC256(EncodesUtil.decodeBase64(base64EncodedSecretKey));
+        JWTVerifier verifier = JWT.require(algorithm).build();
+        verifier.verify(jwtToken);  // 校验不通过会抛出异常
+        //判断合法的标准：1. 头部和荷载部分没有篡改过。2. 没有过期
+        return true;
+    }
+
+}
+```
+
 
 
 
@@ -1685,8 +1870,6 @@ private Map<String, Filter> filters() {
 
 
 # 分布式统一权限系统
-
-
 
 
 
