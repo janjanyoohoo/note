@@ -1,7 +1,7 @@
 # note
 个人笔记
 # JAVA学习记录
-## 1.安全框架
+## 1.认证授权
 
 * Shiro
 
@@ -27,10 +27,22 @@
 
 * 商城
 
-## 7.分布式
+## 7.缓存
+
+- Redis
+
+# 8.微服务
 
 * Spring Cloud
 * Spring Cloud Alibaba
+
+# 9.网络编程
+
+
+
+# 10.MQ
+
+- RabbitMQ
 
 
 

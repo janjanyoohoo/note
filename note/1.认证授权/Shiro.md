@@ -1728,6 +1728,10 @@ JWT由三部分构成：header（头部）、payload（载荷）和signature（�
 
 ## 集成JWT
 
+`继承JWT替代cookie存储sessionID的功能,使用原理与cookie携带sessionId,然后获取SessionId找到对应session相同`
+
+`区别于SSO的Token使用方式,此处的token仅存储session作为一个载体的功能`
+
 - 通过配置文件指定签名
 
 ```java
@@ -1863,13 +1867,686 @@ public class JwtTokenManager {
 }
 ```
 
+### 重写DefaultWebSessionManage
+
+`此处整合的JWT只是代替Cookie存储sessionId的功能,本质与cookie携带sessionid一样,所以需要重写管理器中获取sessionId的方法`
+
+然后重写其获取sessionId的方法
+
+- 继承DefaultWebSessionManage
+- 重写getSessionId方法
+- 首先从请求头中获取请求头token,指定jti为sessionId作为唯一会话标识
+- 如果获取不到,再走获取cookie的方法
+
+```java
+
+package com.itheima.shiro.core.impl;
+
+import com.itheima.shiro.utils.EmptyUtil;
+import io.jsonwebtoken.Claims;
+import org.apache.shiro.web.servlet.ShiroHttpServletRequest;
+import org.apache.shiro.web.session.mgt.DefaultWebSessionManager;
+import org.apache.shiro.web.util.WebUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+
+import javax.servlet.ServletRequest;
+import javax.servlet.ServletResponse;
+import java.io.Serializable;
+
+/**
+ * @Description 重写Jwt会话管理
+ */
+
+public class ShiroSessionManager extends DefaultWebSessionManager {
+	
+	private static final String AUTHORIZATION = "jwtToken";
+
+    private static final String REFERENCED_SESSION_ID_SOURCE = "Stateless request";
+
+    public ShiroSessionManager(){
+        super();
+    }
+
+    @Autowired
+    JwtTokenManager jwtTokenManager;
+
+    @Override
+    protected Serializable getSessionId(ServletRequest request, ServletResponse response){
+        String jwtToken = WebUtils.toHttp(request).getHeader(AUTHORIZATION);
+        if(EmptyUtil.isNullOrEmpty(jwtToken)){
+            //如果没有携带id参数则按照父类的方式在cookie进行获取
+            return super.getSessionId(request, response);
+        }else{
+            //如果请求头中有 authToken 则其值为jwtToken，然后解析出会话session
+        	request.setAttribute(ShiroHttpServletRequest.REFERENCED_SESSION_ID_SOURCE,REFERENCED_SESSION_ID_SOURCE);
+            Claims decode = jwtTokenManager.decodeToken(jwtToken);
+            String id = (String) decode.get("jti");
+            request.setAttribute(ShiroHttpServletRequest.REFERENCED_SESSION_ID,id);
+            request.setAttribute(ShiroHttpServletRequest.REFERENCED_SESSION_ID_IS_VALID,Boolean.TRUE);
+            return id;
+        }
+    }
+
+}
+
+```
+
+### 重写过滤器
+
+`此处重写的默认过滤器时因为在配置文件中指定了部分uri使用到了对应的过滤器,如果未使用到这些默认的过滤器并不用重写 `
+
+`自定义的过滤器需要重写校验逻辑`
+
+BaseResponse返回统一json的对象
+
+```java
+package com.itheima.shiro.core.base;
+
+import com.itheima.shiro.utils.ToString;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+
+/**
+ * @Description 基础返回封装
+ */
+@Data
+public class BaseResponse extends ToString {
+    private Integer code ;
+
+    private String msg ;
+
+    private String date;
+
+    private static final long serialVersionUID = -1;
+
+    public BaseResponse(Integer code, String msg) {
+        this.code = code;
+        this.msg = msg;
+    }
+
+    public BaseResponse(Integer code, String msg, String date) {
+        this.code = code;
+        this.msg = msg;
+        this.date = date;
+    }
+}
+
+```
+
+JwtAuthcFilter
+
+使用wtTokenManager.isVerifyToken(jwtToken)校验颁发jwtToken是否合法，同时在拒绝的时候返回对应的json数据格式
+
+```java
+package com.itheima.shiro.core.filter;
+
+import com.alibaba.fastjson.JSONObject;
+import com.itheima.shiro.constant.ShiroConstant;
+import com.itheima.shiro.core.base.BaseResponse;
+import com.itheima.shiro.core.impl.JwtTokenManager;
+import com.itheima.shiro.core.impl.ShiroSessionManager;
+import com.itheima.shiro.utils.EmptyUtil;
+import org.apache.shiro.web.filter.authc.FormAuthenticationFilter;
+import org.apache.shiro.web.util.WebUtils;
+
+import javax.servlet.ServletRequest;
+import javax.servlet.ServletResponse;
+
+/**
+ * @Description：自定义登录验证过滤器
+ */
+public class JwtAuthcFilter extends FormAuthenticationFilter {
+
+    private JwtTokenManager jwtTokenManager;
+
+    public JwtAuthcFilter(JwtTokenManager jwtTokenManager) {
+        this.jwtTokenManager = jwtTokenManager;
+    }
+
+    /**
+     * @Description 是否允许访问
+     */
+    @Override
+    protected boolean isAccessAllowed(ServletRequest request, ServletResponse response, Object mappedValue) {
+        //判断当前请求头中是否带有jwtToken的字符串
+        String jwtToken = WebUtils.toHttp(request).getHeader("jwtToken");
+        //如果有：走jwt校验
+        if (!EmptyUtil.isNullOrEmpty(jwtToken)){
+            boolean verifyToken = jwtTokenManager.isVerifyToken(jwtToken);
+            if (verifyToken){
+                return super.isAccessAllowed(request, response, mappedValue);
+            }else {
+                return false;
+            }
+        }
+        //没有没有：走原始校验
+        return super.isAccessAllowed(request, response, mappedValue);
+    }
+
+    /**
+     * @Description 访问拒绝时调用
+     */
+    @Override
+    protected boolean onAccessDenied(ServletRequest request, ServletResponse response) throws Exception {
+        //判断当前请求头中是否带有jwtToken的字符串
+        String jwtToken = WebUtils.toHttp(request).getHeader("jwtToken");
+        //如果有：返回json的应答
+        if (!EmptyUtil.isNullOrEmpty(jwtToken)){
+            BaseResponse baseResponse = new BaseResponse(ShiroConstant.NO_LOGIN_CODE,ShiroConstant.NO_LOGIN_MESSAGE);
+            response.setCharacterEncoding("UTF-8");
+            response.setContentType("application/json; charset=utf-8");
+            response.getWriter().write(JSONObject.toJSONString(baseResponse));
+            return false;
+        }
+        //如果没有：走原始方式
+        return super.onAccessDenied(request, response);
+    }
+}
+
+```
+
+JwtPermsFilter
+
+```java
+package com.itheima.shiro.core.filter;
+
+import com.alibaba.fastjson.JSONObject;
+import com.itheima.shiro.constant.ShiroConstant;
+import com.itheima.shiro.core.base.BaseResponse;
+import com.itheima.shiro.utils.EmptyUtil;
+import org.apache.shiro.web.filter.authz.PermissionsAuthorizationFilter;
+import org.apache.shiro.web.util.WebUtils;
+
+import javax.servlet.ServletRequest;
+import javax.servlet.ServletResponse;
+import java.io.IOException;
+
+/**
+ * @Description：自定义jwt的资源校验
+ */
+public class JwtPermsFilter extends PermissionsAuthorizationFilter {
+
+    /**
+     * @Description 访问拒绝时调用
+     */
+    @Override
+    protected boolean onAccessDenied(ServletRequest request, ServletResponse response) throws IOException {
+        //判断当前请求头中是否带有jwtToken的字符串
+        String jwtToken = WebUtils.toHttp(request).getHeader("jwtToken");
+        //如果有：返回json的应答
+        if (!EmptyUtil.isNullOrEmpty(jwtToken)){
+            BaseResponse baseResponse = new BaseResponse(ShiroConstant.NO_AUTH_CODE,ShiroConstant.NO_AUTH_MESSAGE);
+            response.setCharacterEncoding("UTF-8");
+            response.setContentType("application/json; charset=utf-8");
+            response.getWriter().write(JSONObject.toJSONString(baseResponse));
+            return false;
+        }
+        //如果没有：走原始方式
+        return super.onAccessDenied(request, response);
+    }
+}
+
+```
+
+JwtRolesFilter
+
+```java
+package com.itheima.shiro.core.filter;
+
+import com.alibaba.fastjson.JSONObject;
+import com.itheima.shiro.constant.ShiroConstant;
+import com.itheima.shiro.core.base.BaseResponse;
+import com.itheima.shiro.utils.EmptyUtil;
+import org.apache.shiro.web.filter.authz.RolesAuthorizationFilter;
+import org.apache.shiro.web.util.WebUtils;
+
+import javax.servlet.ServletRequest;
+import javax.servlet.ServletResponse;
+import java.io.IOException;
+
+/**
+ * @Description：自定义jwt角色校验
+ */
+public class JwtRolesFilter extends RolesAuthorizationFilter {
+
+    /**
+     * @Description 访问拒绝时调用
+     */
+    @Override
+    protected boolean onAccessDenied(ServletRequest request, ServletResponse response) throws IOException {
+        //判断当前请求头中是否带有jwtToken的字符串
+        String jwtToken = WebUtils.toHttp(request).getHeader("jwtToken");
+        //如果有：返回json的应答
+        if (!EmptyUtil.isNullOrEmpty(jwtToken)){
+            BaseResponse baseResponse = new BaseResponse(ShiroConstant.NO_ROLE_CODE,ShiroConstant.NO_ROLE_MESSAGE);
+            response.setCharacterEncoding("UTF-8");
+            response.setContentType("application/json; charset=utf-8");
+            response.getWriter().write(JSONObject.toJSONString(baseResponse));
+            return false;
+        }
+        //如果没有：走原始方式
+        return super.onAccessDenied(request, response);
+    }
+}
+
+```
+
+### 重写ShiroConfig
+
+1、ShiroSessionManager替换DefaultWebSessionManager
+
+2、生效过滤器
+
+```java
+package com.itheima.shiro.config;
 
 
+import com.itheima.shiro.core.ShiroDbRealm;
+import com.itheima.shiro.core.impl.*;
+import com.itheima.shiro.filter.*;
+import com.itheima.shiro.properties.PropertiesUtil;
+import lombok.extern.log4j.Log4j2;
+import org.apache.shiro.session.mgt.eis.SessionDAO;
+import org.apache.shiro.spring.LifecycleBeanPostProcessor;
+import org.apache.shiro.spring.security.interceptor.AuthorizationAttributeSourceAdvisor;
+import org.apache.shiro.spring.web.ShiroFilterFactoryBean;
+import org.apache.shiro.web.mgt.DefaultWebSecurityManager;
+import org.apache.shiro.web.servlet.SimpleCookie;
+import org.apache.shiro.web.session.mgt.DefaultWebSessionManager;
+import org.redisson.Redisson;
+import org.redisson.api.RedissonClient;
+import org.redisson.config.Config;
+import org.springframework.aop.framework.autoproxy.DefaultAdvisorAutoProxyCreator;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.DependsOn;
+
+import javax.servlet.Filter;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * @Description 权限配置类
+ */
+@Configuration
+@ComponentScan(basePackages = {"com.itheima.shiro.core"})
+@EnableConfigurationProperties({ShiroRedisProperties.class})
+@Log4j2
+public class ShiroConfig {
+
+    @Autowired
+    private ShiroRedisProperties shiroRedisProperties;
+
+    @Autowired
+    JwtTokenManager jwtTokenManager;
+
+    /**
+     * @Description redission客户端
+     */
+    @Bean("redissonClientForShiro")
+    public RedissonClient redissonClient() {
+        log.info("=====初始化redissonClientForShiro开始======");
+        String[] nodeList = shiroRedisProperties.getNodes().split(",");
+        Config config = new Config();
+        if (nodeList.length == 1) {
+            config.useSingleServer().setAddress(nodeList[0])
+                    .setConnectTimeout(shiroRedisProperties.getConnectTimeout())
+                    .setConnectionMinimumIdleSize(shiroRedisProperties.getConnectionMinimumidleSize())
+                    .setConnectionPoolSize(shiroRedisProperties.getConnectPoolSize()).setTimeout(shiroRedisProperties.getTimeout());
+        } else {
+            config.useClusterServers().addNodeAddress(nodeList)
+                    .setConnectTimeout(shiroRedisProperties.getConnectTimeout())
+                    .setMasterConnectionMinimumIdleSize(shiroRedisProperties.getConnectionMinimumidleSize())
+                    .setMasterConnectionPoolSize(shiroRedisProperties.getConnectPoolSize()).setTimeout(shiroRedisProperties.getTimeout());
+        }
+        RedissonClient redissonClient =  Redisson.create(config);
+        log.info("=====初始化redissonClientForShiro完成======");
+        return redissonClient;
+    }
+
+    /**
+     * @Description 创建cookie对象
+     */
+    @Bean(name="sessionIdCookie")
+    public SimpleCookie simpleCookie(){
+        SimpleCookie simpleCookie = new SimpleCookie();
+        simpleCookie.setName("ShiroSession");
+        return simpleCookie;
+    }
+
+    /**
+     * @Description 缓存管理器
+     * @param
+     * @return
+     */
+    @Bean(name="shiroCacheManager")
+    public ShiroCacheManager shiroCacheManager(){
+        return new ShiroCacheManager();
+    }
+
+    /**
+     * @Description 权限管理器
+     * @param
+     * @return
+     */
+    @Bean(name="securityManager")
+    public DefaultWebSecurityManager defaultWebSecurityManager(){
+        DefaultWebSecurityManager securityManager = new DefaultWebSecurityManager();
+        securityManager.setRealm(shiroDbRealm());
+        securityManager.setSessionManager(shiroSessionManager());
+        securityManager.setCacheManager(shiroCacheManager());
+        return securityManager;
+    }
+
+    /**
+     * @Description 自定义RealmImpl
+     */
+    @Bean(name="shiroDbRealm")
+    public ShiroDbRealm shiroDbRealm(){
+        return new ShiroDbRealmImpl();
+    }
 
 
+    /**
+     * @Description 自定义session会话存储的实现类 ，使用Redis来存储共享session，达到分布式部署目的
+     */
+    @Bean("redisSessionDao")
+    public SessionDAO redisSessionDao(){
+        RedisSessionDao sessionDAO =   new RedisSessionDao();
+        sessionDAO.setGlobalSessionTimeout(shiroRedisProperties.getGlobalSessionTimeout());
+        return sessionDAO;
+    }
 
+    /**
+     * @Description 会话管理器
+     */
+    @Bean(name="sessionManager")
+    public ShiroSessionManager shiroSessionManager(){
+        ShiroSessionManager sessionManager = new ShiroSessionManager();
+        sessionManager.setSessionDAO(redisSessionDao());
+        sessionManager.setSessionValidationSchedulerEnabled(false);
+        sessionManager.setSessionIdCookieEnabled(true);
+        sessionManager.setSessionIdCookie(simpleCookie());
+        sessionManager.setGlobalSessionTimeout(shiroRedisProperties.getGlobalSessionTimeout());
+        return sessionManager;
+    }
+
+    /**
+     * @Description 保证实现了Shiro内部lifecycle函数的bean执行
+     */
+    @Bean(name = "lifecycleBeanPostProcessor")
+    public static LifecycleBeanPostProcessor getLifecycleBeanPostProcessor() {
+        return new LifecycleBeanPostProcessor();
+    }
+
+    /**
+     * @Description AOP式方法级权限检查
+     */
+    @Bean
+    @DependsOn("lifecycleBeanPostProcessor")
+    public DefaultAdvisorAutoProxyCreator getDefaultAdvisorAutoProxyCreator() {
+        DefaultAdvisorAutoProxyCreator defaultAdvisorAutoProxyCreator = new DefaultAdvisorAutoProxyCreator();
+        defaultAdvisorAutoProxyCreator.setProxyTargetClass(true);
+        return defaultAdvisorAutoProxyCreator;
+    }
+
+    /**
+     * @Description 配合DefaultAdvisorAutoProxyCreator事项注解权限校验
+     */
+    @Bean
+    public AuthorizationAttributeSourceAdvisor getAuthorizationAttributeSourceAdvisor() {
+        AuthorizationAttributeSourceAdvisor aasa = new AuthorizationAttributeSourceAdvisor();
+        aasa.setSecurityManager(defaultWebSecurityManager());
+        return new AuthorizationAttributeSourceAdvisor();
+    }
+
+    /**
+     * @Description 过滤器链
+     */
+    private Map<String, String> filterChainDefinition(){
+        List<Object> list  = PropertiesUtil.propertiesShiro.getKeyList();
+        Map<String, String> map = new LinkedHashMap<>();
+        for (Object object : list) {
+            String key = object.toString();
+            String value = PropertiesUtil.getShiroValue(key);
+            log.info("读取防止盗链控制：---key{},---value:{}",key,value);
+            map.put(key, value);
+        }
+        return map;
+    }
+
+
+    /**
+     * @Description 自定义过滤器定义
+     */
+    private Map<String, Filter> filters() {
+        Map<String, Filter> map = new HashMap<String, Filter>();
+        map.put("roleOr", new RolesOrAuthorizationFilter());
+        map.put("kicked-out", new KickedOutAuthorizationFilter(redissonClient(), redisSessionDao(), shiroSessionManager()));
+        map.put("jwt-authc", new JwtAuthcFilter(jwtTokenManager));
+        map.put("jwt-perms", new JwtPermsFilter());
+        map.put("jwt-roles", new JwtRolesFilter());
+        return map;
+    }
+
+    /**
+     * @Description Shiro过滤器
+     */
+    @Bean("shiroFilter")
+    public ShiroFilterFactoryBean shiroFilterFactoryBean(){
+        ShiroFilterFactoryBean shiroFilter = new ShiroFilterFactoryBean();
+        shiroFilter.setSecurityManager(defaultWebSecurityManager());
+        //使自定义过滤器生效
+        shiroFilter.setFilters(filters());
+        shiroFilter.setFilterChainDefinitionMap(filterChainDefinition());
+        shiroFilter.setLoginUrl("/login");
+        shiroFilter.setUnauthorizedUrl("/login");
+        return shiroFilter;
+    }
+
+}
+
+```
+
+业务代码
+
+LoginAction
+
+添加LoginForJwt方法
+
+```java
+/**
+	 * @Description jwt的json登录方式
+	 * @param loginVo
+	 * @return
+	 */
+	@RequestMapping("login-jwt")
+	@ResponseBody
+	public BaseResponse LoginForJwt(@RequestBody LoginVo loginVo){
+		return loginService.routeForJwt(loginVo);
+	}
+```
+
+LoginService
+
+添加routeForJwt方法
+
+```java
+package com.itheima.shiro.service;
+
+import com.itheima.shiro.core.base.BaseResponse;
+import com.itheima.shiro.vo.LoginVo;
+import org.apache.shiro.authc.IncorrectCredentialsException;
+import org.apache.shiro.authc.UnknownAccountException;
+
+import java.util.Map;
+
+/**
+ * @Description 登陆业务接口
+ */
+
+public interface LoginService {
+	
+	/**
+	 * @Description 登陆路由
+	 * @param loginVo 登录参数
+	 * @return
+	 */
+	public Map<String, String> route(LoginVo loginVo) throws UnknownAccountException,IncorrectCredentialsException;
+
+	/**
+	 * @Description jwt方式登录
+	 @param loginVo 登录参数
+	 * @return
+	 */
+	public BaseResponse routeForJwt(LoginVo loginVo) throws UnknownAccountException,IncorrectCredentialsException;
+
+}
+
+
+```
+
+LoginServiceImpl
+
+```java
+
+package com.itheima.shiro.service.impl;
+
+import com.alibaba.fastjson.JSONObject;
+import com.itheima.shiro.constant.CacheConstant;
+import com.itheima.shiro.constant.ShiroConstant;
+import com.itheima.shiro.core.base.BaseResponse;
+import com.itheima.shiro.core.base.ShiroUser;
+import com.itheima.shiro.core.base.SimpleToken;
+import com.itheima.shiro.core.bridge.UserBridgeService;
+import com.itheima.shiro.core.impl.JwtTokenManager;
+import com.itheima.shiro.pojo.User;
+import com.itheima.shiro.service.LoginService;
+import com.itheima.shiro.utils.BeanConv;
+import com.itheima.shiro.utils.ShiroUserUtil;
+import com.itheima.shiro.utils.ShiroUtil;
+import com.itheima.shiro.vo.LoginVo;
+import lombok.extern.log4j.Log4j2;
+import org.apache.shiro.SecurityUtils;
+import org.apache.shiro.authc.IncorrectCredentialsException;
+import org.apache.shiro.authc.UnknownAccountException;
+import org.apache.shiro.subject.Subject;
+import org.redisson.api.RedissonClient;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+import javax.annotation.Resource;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+
+/**
+ * @Description 登陆业务实现
+ */
+@Service("loginService")
+@Log4j2
+public class LoginServiceImpl implements LoginService {
+
+    @Resource(name = "redissonClientForShiro")
+    RedissonClient redissonClient;
+
+    @Autowired
+    UserBridgeService userBridgeService;
+
+    @Autowired
+    JwtTokenManager jwtTokenManager;
+
+    /* (non-Javadoc)
+     * @see LoginService#route(com.yz.commons.vo.LoginVo)
+     */
+    @Override
+    public Map<String, String> route(LoginVo loginVo) throws UnknownAccountException, IncorrectCredentialsException {
+        Map<String, String> map = new HashMap<>();
+        try {
+            SimpleToken token = new SimpleToken(null, loginVo.getLoginName(), loginVo.getPassWord());
+            Subject subject = SecurityUtils.getSubject();
+            subject.login(token);
+            //创建缓存
+            this.loadAuthorityToCache();
+        } catch (UnknownAccountException ex) {
+            log.error("登陆异常:{}", ex);
+            throw new UnknownAccountException(ex);
+        } catch (IncorrectCredentialsException ex) {
+            log.error("登陆异常:{}", ex);
+            throw new IncorrectCredentialsException(ex);
+        }
+        return map;
+    }
+
+    @Override
+    public BaseResponse routeForJwt(LoginVo loginVo) throws UnknownAccountException, IncorrectCredentialsException {
+        Map<String, String> map = new HashMap<>();
+        String jwtToken = null;
+        try {
+            SimpleToken token = new SimpleToken(null, loginVo.getLoginName(), loginVo.getPassWord());
+            Subject subject = SecurityUtils.getSubject();
+            subject.login(token);
+            String shiroSessionId = ShiroUserUtil.getShiroSessionId();
+            //登录后颁发的令牌
+            ShiroUser shiroUser = ShiroUserUtil.getShiroUser();
+            Map<String, Object> claims = new HashMap<>();
+            claims.put("shiroUser", JSONObject.toJSONString(shiroUser));
+            jwtToken = jwtTokenManager.IssuedToken("system", subject.getSession().getTimeout(),shiroSessionId,claims);
+            map.put("jwtToken",jwtToken );
+            log.info("jwtToken:{}",map.toString());
+            //创建缓存
+            this.loadAuthorityToCache();
+        } catch (Exception ex) {
+            BaseResponse baseResponse = new BaseResponse(ShiroConstant.LOGIN_FAILURE_CODE, ShiroConstant.LOGIN_FAILURE_MESSAGE);
+            return baseResponse;
+        }
+        BaseResponse baseResponse = new BaseResponse(ShiroConstant.LOGIN_SUCCESS_CODE,ShiroConstant.LOGIN_SUCCESS_MESSAGE,jwtToken);
+        return baseResponse;
+    }
+
+    /**
+     *
+     * <b>方法名：</b>：loadAuthorityToCache<br>
+     * <b>功能说明：</b>：加载缓存<br>
+     */
+    private void loadAuthorityToCache(){
+        //登陆成功后缓存用户的权限信息进入缓存
+        ShiroUser shiroUser = ShiroUserUtil.getShiroUser();
+        User user = BeanConv.toBean(shiroUser, User.class);
+        userBridgeService.loadUserAuthorityToCache(user);
+
+    }
+
+}
+
+```
+
+【5】authentication.properties
+
+```properties
+#静态资源不过滤
+/static/**=anon
+#登录链接不过滤
+/login/**=anon
+#访问/resource/**需要有admin的角色
+#/resource/**=roleOr[MangerRole,SuperAdmin]
+/role/** =jwt-roles[SuperAdmin]
+/resource/** =jwt-perms[role:listInitialize]
+#其他链接是需要登录的
+/**=kicked-out,jwt-authc
+```
 
 # 分布式统一权限系统
+
+- 认证授权服务化将认证授权功能单独抽取成为一个服务;
+- 动态配置过滤器链
+
+ TODO 
 
 
 
