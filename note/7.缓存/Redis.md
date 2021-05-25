@@ -797,11 +797,416 @@ Redis 客户端可以订阅任意数量的频道。
 
 
 
+# Redis事务
+
+- Redis事务是一个单独的隔离操作：事务中的所有命令都会序列化、按顺序地执行。事务在执行的过程中，不会被其他客户端发送来的命令请求所打断。
+
+- Redis事务的主要作用就是串联多个命令防止别的命令插队。
+
+## Multi,Exec,discard
+
+从输入Multi命令开始，输入的命令都会依次进入命令队列中，但不会执行，直到输入Exec后，Redis会将之前的命令队列中的命令依次执行。
+
+组队的过程中可以通过discard来放弃组队。 
+
+![image-20210525231405024](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210525231412.png)
+
+
+
+![image-20210525231433313](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210525231433.png)
 
 
 
 
 
+组队成功，提交成功
+
+![image-20210525231537832](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210525231537.png)
+
+组队阶段报错，提交失败
+
+![image-20210525231541918](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210525231541.png)
+
+组队成功，提交有成功有失败情况
+
+
+
+## 事务的错误处理
+
+- 组队中某个命令出现了报告错误，执行时整个的所有队列都会被取消。
+
+![image-20210525231649509](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210525231649.png)
+
+- 如果执行阶段某个命令报出了错误，则只有报错的命令不会被执行，而其他的命令都会执行，不会回滚。
+
+![image-20210525231653917](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210525231654.png)
+
+## 事务冲突
+
+```properties
+一个请求想给金额减8000
+一个请求想给金额减5000
+一个请求想给金额减1000
+```
+
+![image-20210525231732874](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210525231732.png)
+
+### 悲观锁
+
+![image-20210525231802010](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210525231802.png)
+
+- **悲观锁(Pessimistic Lock)**, 顾名思义，就是很悲观，每次去拿数据的时候都认为别人会修改，所以每次在拿数据的时候都会上锁，这样别人想拿这个数据就会block直到它拿到锁。**传统的关系型数据库里边就用到了很多这种锁机制**，比如**行锁**，**表锁**等，**读锁**，**写锁**等，都是在做操作之前先上锁。
+
+
+
+### 乐观锁
+
+![image-20210525231815785](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210525231815.png)
+
+- **乐观锁(Optimistic Lock),** 顾名思义，就是很乐观，每次去拿数据的时候都认为别人不会修改，所以不会上锁，但是在更新的时候会判断一下在此期间别人有没有去更新这个数据，可以使用版本号等机制。**乐观锁适用于多读的应用类型，这样可以提高吞吐量**。Redis就是利用这种check-and-set机制实现事务的。
+
+
+
+## 锁
+
+`WATCH key [key ...] `
+
+- 在执行multi之前，先执行watch key1 [key2],可以监视一个(或多个) key ，如果在事务**执行之前这个(****或这些) key** **被其他命令所改动，那么事务将被打断。**
+
+`unwatch`
+
+- 取消 WATCH 命令对所有 key 的监视。
+
+  如果在执行 WATCH 命令之后，EXEC 命令或DISCARD 命令先被执行了的话，那么就不需要再执行UNWATCH 了。
+
+  http://doc.redisfans.com/transaction/exec.html
+
+## 事务三特性
+
+Ø **单独的隔离操作** 
+
+n 事务中的所有命令都会序列化、按顺序地执行。事务在执行的过程中，不会被其他客户端发送来的命令请求所打断。 
+
+Ø **没有隔离级别的概念** 
+
+n 队列中的命令没有提交之前都不会实际被执行，因为事务提交前任何指令都不会被实际执行
+
+Ø **不保证原子性** 
+
+n 事务中如果有一条命令执行失败，其后的命令仍然会被执行，没有回滚 
+
+
+
+# 持久化
+
+[官网介绍](http://www.redis.io)
+
+Redis 提供了2个不同形式的持久化方式。
+
+- RDB（Redis DataBase）
+
+- AOF（Append Of File）
+
+## RDB(Redis DataBase)
+
+在指定的时间间隔内将内存中的数据集快照写入磁盘， 也就是行话讲的Snapshot快照，它恢复时是将快照文件直接读到内存里
+
+### 备份是如何执行的
+
+Redis会单独**创建（fork）一个子进程来进行持久化**，会先将数据写入到 一个临时文件中，待持久化过程都结束了，再用这个临时文件替换上次持久化好的文件。 整个过程中，主进程是不进行任何IO操作的，这就确保了极高的性能 如果需要进行大规模数据的恢复，且对于数据恢复的完整性不是非常敏感，那RDB方式要比AOF方式更加的高效。
+
+**RDB**的缺点是最后一次持久化后的数据可能丢失。
+
+### Fork
+
+- Fork的作用是复制一个与当前进程一样的进程。新进程的所有数据（变量、环境变量、程序计数器等） 数值都和原进程一致，但是是一个全新的进程，并作为原进程的子进程
+
+- 在Linux程序中，fork()会产生一个和父进程完全相同的子进程，但子进程在此后多会exec系统调用，出于效率考虑，Linux中引入了“**写时复制技术**”
+
+- **一般情况父进程和子进程会共用同一段物理内存**，只有进程空间的各段的内容要发生变化时，才会将父进程的内容复制一份给子进程。
+
+### 持久化流程
+
+![image-20210525232752611](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210525232752.png)
+
+### dump.rdb文件
+
+- 在redis.conf中配置文件名称，默认为dump.rdb (可以修改)
+
+![image-20210525232828713](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210525232828.png)
+
+- rdb文件的保存路径，也可以修改。默认为Redis启动时命令行所在的目录下
+
+  dir "/myredis/"
+
+  ![image-20210525232847008](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210525232847.png)
+
+### 配置策略与命令
+
+- 默认策略
+
+![image-20210525232951256](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210525232951.png)
+
+3600秒  有1个key变化
+
+30秒 有10个key变化
+
+60秒 有10000个key变化 
+
+满足任何一个条件 便会进行初始化
+
+```properties
+save ：save时只管保存，其它不管，全部阻塞。手动保存。不建议。
+bgsave：Redis会在后台异步进行快照操作， 快照同时还可以响应客户端请求。
+可以通过lastsave 命令获取最后一次成功执行快照的时间
+```
+
+
+
+`flushall`
+
+执行flushall命令，也会产生dump.rdb文件，但里面是空的，无意义
+
+`save`
+
+格式：save 秒钟 写操作次数
+
+RDB是整个内存的压缩过的Snapshot，RDB的数据结构，可以配置复合的快照触发条件，
+
+默认是1分钟内改了1万次，或5分钟内改了10次，或15分钟内改了1次。
+
+- `禁用`
+
+不设置save指令，或者给save传入空字符串
+
+`stop-writes-on-bgsave-error`
+
+当Redis无法写入磁盘的话，直接关掉Redis的写操作。推荐yes.
+
+![image-20210525233421850](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210525233421.png)
+
+`rdbcompression压缩文件`
+
+对于存储到磁盘中的快照，可以设置是否进行压缩存储。如果是的话，redis会采用LZF算法进行压缩。
+
+如果你不想消耗CPU来进行压缩的话，可以设置为关闭此功能。推荐yes.
+
+![image-20210525233451267](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210525233451.png)
+
+`rdbchecksum检查完整性`
+
+在存储快照后，还可以让redis使用CRC64算法来进行数据校验，
+
+但是这样做会增加大约10%的性能消耗，如果希望获取到最大的性能提升，可以关闭此功能
+
+推荐yes.
+
+![image-20210525233523956](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210525233524.png)
+
+### 备份
+
+先通过config get dir 查询rdb文件的目录 
+
+将*.rdb的文件拷贝到别的地方
+
+rdb的恢复
+
+- 关闭Redis
+
+- 先把备份的文件拷贝到工作目录下 cp dump2.rdb dump.rdb
+
+- 启动Redis, 备份数据会直接加载
+
+### 优势
+
+- 适合大规模的数据恢复
+
+- 对数据完整性和一致性要求不高更适合使用
+
+- 节省磁盘空间
+
+- 恢复速度快
+
+![image-20210525233700331](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210525233700.png)
+
+### 劣势
+
+- Fork的时候，内存中的数据被克隆了一份，大致2倍的膨胀性需要考虑
+
+- 虽然Redis在fork时使用了**写时拷贝技术**,但是如果数据庞大时还是比较消耗性能。
+
+- 在备份周期在一定间隔时间做一次备份，所以如果Redis意外down掉的话，就会丢失最后一次快照后的所有修改。
+
+### 动态停止
+
+RDB：`redis-cli config set save ""#save`后给空值，表示禁用保存策略
+
+### 总结
+
+![image-20210525233814067](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210525233814.png)
+
+
+
+## AOF(Append Only File)
+
+以**日志**的形式来记录每个写操作（增量保存），将Redis执行过的所有写指令记录下来(**读操作不记录**)，
+
+**只许追加文件但不可以改写文件**，redis启动之初会读取该文件重新构建数据，换言之，redis 重启的话就根据日志文件的内容将写指令从前到后执行一次以完成数据的恢复工作
+
+#### AOF持久化流程
+
+  (1）客户端的请求写命令会被append追加到AOF缓冲区内；
+
+（2）AOF缓冲区根据AOF持久化策略[always,everysec,no]将操作sync同步到磁盘的AOF文件中；
+
+（3）AOF文件大小超过重写策略或手动重写时，会对AOF文件rewrite重写，压缩AOF文件容量；
+
+（4）Redis服务重启时，会重新load加载AOF文件中的写操作达到数据恢复的目的；
+
+![image-20210525233931170](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210525233931.png)
+
+### 开启
+
+`修改默认的appendonly no，改为yes`
+
+- 默认不开启
+
+可以在redis.conf中配置文件名称，默认为 appendonly.aof
+
+AOF文件的保存路径，同RDB的路径一致。
+
+- AOF和RDB同时开启，系统默认取AOF的数据（数据不会存在丢失）
+
+### 启动与恢复
+
+- AOF的备份机制和性能虽然和RDB不同, 但是备份和恢复的操作同RDB一样，都是拷贝备份文件，需要恢复时再拷贝到Redis工作目录下，启动系统即加载。
+  - 正常恢复
+  - 修改默认的appendonly no，改为yes
+  - 将有数据的aof文件复制一份保存到对应目录(查看目录：config get dir)
+  - 恢复：重启redis然后重新加载
+
+ 
+
+- 异常恢复
+  - 修改默认的appendonly no，改为yes
+  - 如遇到AOF文件损坏**，通过/usr/local/bin/**redis-check-aof--fix appendonly.aof进行恢复
+  - 备份被写坏的AOF文件
+  - 恢复：重启redis，然后重新加载
+
+### 同步频率
+
+- `appendfsync always`
+
+始终同步，每次Redis的写入都会立刻记入日志；性能较差但数据完整性比较好
+
+- `appendfsync everysec`
+
+每秒同步，每秒记入日志一次，如果宕机，本秒的数据可能丢失。
+
+- `appendfsync no`
+
+redis不主动进行同步，把同步时机交给操作系统。
+
+### Rewrite重写压缩
+
+1是什么：
+
+AOF采用文件追加方式，文件会越来越大为避免出现此种情况，新增了重写机制, 当AOF文件的大小超过所设定的阈值时，Redis就会启动AOF文件的内容压缩， 只保留可以恢复数据的最小指令集.可以使用命令bgrewriteaof
+
+2重写原理，如何实现重写
+
+AOF文件持续增长而过大时，会`fork出一条新进程来将文件重写(也是先写临时文件最后再rename)`，redis4.0版本后的重写，是指上就是`把rdb 的快照，以二级制的形式附在新的aof头部，作为已有的历史数据，替换掉原来的流水账操作`。
+
+`no-appendfsync-on-rewrite：`
+
+- 如果 `no-appendfsync-on-rewrite=yes `,不写入aof文件只写入缓存，用户请求不会阻塞，但是在这段时间如果宕机会丢失这段时间的缓存数据。（降低数据安全性，提高性能）
+
+   如果 no-appendfsync-on-rewrite=no, 还是会把数据往磁盘里刷，但是遇到重写操作，可能会发生阻塞。（数据安全，但是性能降低）
+
+- 触发机制，何时重写
+  - Redis会记录上次重写时的AOF大小，默认配置是当**AOF文件大小是上次rewrite后大小的一倍且文件大于64M时触发**
+  - 重写虽然可以节约大量磁盘空间，减少恢复时间。但是每次重写还是有一定的负担的，因此设定Redis要满足一定条件才会进行重写。 
+
+`auto-aof-rewrite-percentage`设置重写的基准值，文件达到100%时开始重写（文件是原来重写后文件的2倍时触发）
+
+`auto-aof-rewrite-min-size：`设置重写的基准值，最小文件64MB。达到这个值开始重写。
+
+- 例如：文件达到70MB开始重写，降到50MB，下次什么时候开始重写？100MB
+
+- 系统载入时或者上次重写完毕时，Redis会记录此时AOF大小，设为base_size,
+
+如果Redis的`AOF当前大小>= base_size +base_size*100% (默认)且当前大小>=64mb(默认)的情况下`，Redis会对AOF进行重写。 
+
+3、重写流程
+
+- bgrewriteaof触发重写，判断是否当前有bgsave或bgrewriteaof在运行，如果有，则等待该命令结束后再继续执行。
+
+- 主进程fork出子进程执行重写操作，保证主进程不会阻塞。
+
+- 子进程遍历redis内存中数据到临时文件，客户端的写请求同时写入aof_buf缓冲区和aof_rewrite_buf重写缓冲区保证原AOF文件完整以及新AOF文件生成期间的新的数据修改动作不会丢失。
+
+- 子进程写完新的AOF文件后，向主进程发信号，父进程更新统计信息。2).主进程把aof_rewrite_buf中的数据写入到新的AOF文件。
+
+- 使用新的AOF文件覆盖旧的AOF文件，完成AOF重写。
+
+![image-20210525235027390](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210525235027.png)
+
+### 优势
+
+![image-20210525235045863](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210525235045.png)
+
+- 备份机制更稳健，丢失数据概率更低。
+
+- 可读的日志文本，通过操作AOF稳健，可以处理误操作。
+
+### 劣势
+
+- 比起RDB占用更多的磁盘空间。
+
+- 恢复备份速度要慢。
+
+- 每次读写都同步的话，有一定的性能压力。
+
+- 存在个别Bug，造成恢复不能。
+
+### 总结
+
+![image-20210525235132016](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210525235132.png)
+
+## 总结
+
+官方推荐两个都启用。
+
+- 如果对数据不敏感，可以选单独用RDB。
+
+- 不建议单独用 AOF，因为可能会出现Bug。
+
+- 如果只是做纯内存缓存，可以都不用。
+
+### 官网建议
+
+- RDB持久化方式能够在指定的时间间隔能对你的数据进行快照存储
+
+- AOF持久化方式记录每次对服务器写的操作,当服务器重启的时候会重新执行这些命令来恢复原始的数据,AOF命令以redis协议追加保存每次写的操作到文件末尾. 
+
+- Redis还能对AOF文件进行后台重写,使得AOF文件的体积不至于过大
+
+- 只做缓存：如果你只希望你的数据在服务器运行的时候存在,你也可以不使用任何持久化方式.
+
+- 同时开启两种持久化方式
+  - 在这种情况下,当redis重启的时候会优先载入AOF文件来恢复原始的数据, 因为在通常情况下AOF文件保存的数据集要比RDB文件保存的数据集要完整.
+
+- RDB的数据不实时，同时使用两者时服务器重启也只会找AOF文件。那要不要只使用AOF呢？ 
+  - 建议不要，因为RDB更适合用于备份数据库(AOF在不断变化不好备份)， 快速重启，而且不会有AOF可能潜在的bug，留着作为一个万一的手段。
+
+- 性能建议
+  - 因为RDB文件只用作后备用途，建议只在Slave上持久化RDB文件，而且只要15分钟备份一次就够了，只保留save 900 1这条规则。
+  - 如果使用AOF，好处是在最恶劣情况下也只会丢失不超过两秒数据，启动脚本较简单只load自己的AOF文件就可以了。
+  - 代价,一是带来了持续的IO，二是AOF rewrite的最后将rewrite过程中产生的新数据写到新文件造成的阻塞几乎是不可避免的。
+  - 只要硬盘许可，应该尽量减少AOF rewrite的频率，AOF重写的基础大小默认值64M太小了，可以设到5G以上。
+  - 默认超过原大小100%大小时重写可以改到适当的数值。
+
+# 主从复制
 
 
 
