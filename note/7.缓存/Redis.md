@@ -1208,19 +1208,417 @@ AOF文件持续增长而过大时，会`fork出一条新进程来将文件重写
 
 # 主从复制
 
+- 主机数据更新后根据配置和策略， 自动同步到备机的master/slaver机制，**Master**以写为主，**Slave**以读为主
+
+l 读写分离，性能扩展
+
+l 容灾快速恢复
+
+ ![image-20210528213546703](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210528213553.png)
+
+## 准备工作         
+
+```java
+打开防火墙端口,每台主机都需要开放端口
+systemctl start firewalld
+firewall-cmd --zone=public --add-port=6001/tcp --permanent  
+firewall-cmd --reload
+
+更新GCC版本
+# 所有gcc为低版本的服务器都需要更新
+执行 gcc -v    # 查看版本
+
+解压 tar xvf gccrpm.tar 进入目录cd rpmPackage/ 
+执行 rpm -Uvh *.rpm --nodeps –force
+执行 scl enable devtoolset-9 bash 
+需要注意的是scl命令启用只是临时的，退出shell或重启就会恢复原系统gcc版本。 
+如果要长期使用gcc 9.3的话： echo "source /opt/rh/devtoolset-9/enable" >>/etc/profile
+
+```
+
+## 安装
+
+### 主节点
+
+```java
+安装redis
+主节点
+上传redis-6.0.6.tar.gz
+cd redis-6.0.6
+make && make install PREFIX=/usr/local/redis-node  #指定redis安装路径
+# 打开安装路径,更改配置文件redis.conf
+daemonize yes #后台启动
+port 6001 # 端口号
+bind 0.0.0.0 当前主机IP
+appendonly yes
+requirepass 密码(与主节点相同)
+masterauth 密码(与主节点相同)
+protected-mode no  #保护模式
+```
+
+```java
+启动主节点
+进入redis-node文件夹
+执行 ./redis-server redis.conf 		# 启动redis
+检查是否启动 ps -ef | grep redis 
+```
+
+### 从节点
+
+```java
+从节点
+从节点需要配置两个,在两个服务器上执行相同配置
+上传redis-6.0.6.tar.gz
+cd redis-6.0.6
+make && make install PREFIX=/usr/local/redis-node  #指定redis安装路径
+# 打开安装路径,更改配置文件redis.conf
+daemonize yes #后台启动
+port 6001 # 端口号
+bind 0.0.0.0 当前主机IP
+appendonly yes
+requirepass 密码
+masterauth 密码(与requirepass相同)
+replicaof 主节点ip 主节点端口  #从主节点复制
+protected-mode no  #保护模式
+```
+
+```java
+启动从节点
+进入redis-node文件夹
+执行 ./redis-server redis.conf 		# 启动redis
+检查是否启动 ps -ef | grep redis
+```
+
+## 原理
+
+l Slave启动成功连接到master后会发送一个sync命令
+
+l Master接到命令启动后台的存盘进程，同时收集所有接收到的用于修改数据集命令， 在后台进程执行完毕之后，master将传送整个数据文件到slave,以完成一次完全同步
+
+l 全量复制：而slave服务在接收到数据库文件数据后，将其存盘并加载到内存中。
+
+l 增量复制：Master继续将新的所有收集到的修改命令依次传给slave,完成同步
+
+l 但是只要是重新连接master,一次完全同步（全量复制)将被自动执行
+
+![image-20210528214459208](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210528214459.png)
+
+# 哨兵sentinel
+
+## 概念
+
+**反客为主的自动版**，能够后台监控主机是否故障，如果故障了根据投票数自动将从库转换为主库
+
+![image-20210528214510453](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210528214510.png)
+
+- **当主机挂掉，从机选举中产生新的主机**
+
+哪个从机会被选举为主机呢？根据优先级别：slave-priority 
+
+原主机重启后会变为从机。
+
+### 复制延时
+
+由于所有的**写操作都是先在Master上操作**，然后同步更新到Slave上，所以从Master同步到Slave机器有一定的延迟，当系统很繁忙的时候，延迟问题会更加严重，Slave机器数量的增加也会使这个问题更加严重。
+
+## 安装
+
+### 哨兵节点
+
+```java
+上传redis-6.0.6.tar.gz
+cd redis-6.0.6
+make && make install PREFIX=/usr/local/redis-node  #指定redis安装路径
+    
+# 打开安装路径,更改配置文件redis.conf
+daemonize yes 				# 后台启动
+port 6001 					# 端口号
+bind 0.0.0.0 当前主机IP    	 # 若设置为 127.0.0.1 则无法进行远程连接
+protected-mode no  			# 保护模式 yes远程无法访问  no远程可以访问
+    
+修改redis-sentinel.conf配置文件
+# 1. 绑定的地址
+bind 主机IP
+# 2. 保护模式修改为否，允许远程连接
+protected-mode no
+# 3. 设定监控地址，为对应的主redis库的IP地址 端口
+sentinel monitor mymaster 172.16.48.129 6379 2
+# 4. 主节点密码
+sentinel auth-pass mymaster 123456789
+```
+
+```java
+启动哨兵
+进入redis-node文件夹
+执行 ./redis-sentinel redis-sentinel.conf    # 启动哨兵
+```
+
+**启动需要按照Master->Slave->Sentinel的顺序进行启动**
+
+### 验证
+
+在终端输入info replication命令, 查看当前节点信息,一级slaves节点信息
+
+## 故障恢复
+
+优先级在redis.conf中默认：slave-priority 100，值越小优先级越高
+
+偏移量是指获得原主机数据最全的
+
+每个redis实例启动后都会随机生成一个40位的runid
+
+![image-20210528214642928](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210528214643.png)
+
+# 集群
+
+- **问题**
+
+容量不够，redis如何进行扩容？
+
+并发写操作， redis如何分摊？
+
+另外，主从模式，薪火相传模式，主机宕机，导致ip地址发生变化，应用程序中配置需要修改对应的主机地址、端口等信息。
+
+之前通过代理主机来解决，但是redis3.0中提供了解决方案。就是无中心化集群配置。
+
+- **什么是集群**
+
+**Redis 集群实现了对Redis的水平扩容，即启动N个redis节点，将整个数据库分布存储在这N个节点中，每个节点存储总数据的1/N。**
+
+**Redis 集群通过分区（partition）来提供一定程度的可用性（availability）： 即使集群中有一部分节点失效或者无法进行通讯， 集群也可以继续处理命令请求。**
+
+## 配置集群
+
+```java
+1.删除持久化数据
+将rdb,aof文件都删除掉。
+    
+2.制作6个实例，
+6379,6380,6381,6389,6390,6391
+    
+3.配置基本信息
+开启daemonize yes
+Pid文件名字
+指定端口
+Log文件名字
+Dump.rdb名字
+Appendonly 关掉或者换名字
+    
+4.redis cluster配置修改
+cluster-enabled yes    					#打开集群模式
+cluster-config-file nodes-6379.conf  	#设定节点配置文件名
+cluster-node-timeout 15000   			#设定节点失联时间，超过该时间（毫秒），集群自动进行主从切换。
+include /home/bigdata/redis.conf
+port 6379
+pidfile "/var/run/redis_6379.pid"
+dbfilename "dump6379.rdb"
+dir "/home/bigdata/redis_cluster"
+logfile "/home/bigdata/redis_cluster/redis_err_6379.log"
+cluster-enabled yes
+cluster-config-file nodes-6379.conf
+cluster-node-timeout 15000
+
+5.拷贝多个redis.conf文件
+
+6.启动6个redis服务
+    
+7.六个节点合成一个集群 使用默认分配策略
+组合之前，请确保所有redis实例启动后，nodes-xxxx.conf文件都生成正常。
+此处不要用127.0.0.1， 请用真实IP地址
+--replicas 1 采用最简单的方式配置集群，一台主机，一台从机，正好三组。
+redis-cli --cluster create --cluster-replicas 1 192.168.11.101:6379 192.168.11.101:6380 192.168.11.101:6381 192.168.11.101:6389 192.168.11.101:6390 192.168.11.101:6391
+    
+8.通过 cluster nodes 命令查看集群信息
+```
+
+## 分配策略
+
+一个集群至少要有三个主节点。
+
+选项 --cluster-replicas 1 表示我们希望为集群中的每个主节点创建一个从节点。
+
+分配原则尽量保证每个主数据库运行在不同的IP地址，每个从库和主库不在一个IP地址上。
+
+## 插槽slots
+
+一个 Redis 集群包含 16384 个插槽（hash slot）， 数据库中的每个键都属于这 16384 个插槽的其中一个， 
+
+集群使用公式 CRC16(key) % 16384 来计算键 key 属于哪个槽， 其中 CRC16(key) 语句用于计算键 key 的 CRC16 校验和.
+
+集群中的每个节点负责处理一部分插槽。 举个例子， 如果一个集群可以有主节点， 其中：
+
+节点 A 负责处理 0 号至 5460 号插槽。
+
+节点 B 负责处理 5461 号至 10922 号插槽。
+
+节点 C 负责处理 10923 号至 16383 号插槽。
+
+## 在集群中录入值
+
+在redis-cli每次录入、查询键值，redis都会计算出该key应该送往的插槽，如果不是该客户端对应服务器的插槽，redis会报错，并告知应前往的redis实例地址和端口。
+
+`redis-cli客户端提供了 –c 参数实现自动重定向。`
+
+如 redis-cli -c –p 6379 登入后，再录入、查询键值对可以自动重定向。
+
+不在一个slot下的键值，是不能使用mget,mset等多键操作。
+
+​                             ![image-20210528215256797](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210528215256.png)  
+
+可以通过{}来定义组的概念，从而使key中{}内相同内容的键值对放到一个slot中去。
+
+ ![image-20210528215259966](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210528215300.png)
+
+## 查询集群中的值
+
+`CLUSTER GETKEYSINSLOT <slot><count> 返回 count 个 slot 槽中的键。`
+
+## 故障恢复
+
+如果主节点下线？从节点能否自动升为主节点？注意：**15****秒超时**
+
+​                         ![image-20210528215419146](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210528215419.png)      
+
+主节点恢复后，主从关系会如何？主节点回来变成从机。
+
+ ![image-20210528215422235](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210528215422.png)
+
+如果所有某一段插槽的主从节点都宕掉，redis服务是否还能继续?
+
+如果某一段插槽的主从都挂掉，而cluster-require-full-coverage 为yes ，那么 ，整个集群都挂掉
+
+如果某一段插槽的主从都挂掉，而cluster-require-full-coverage 为no ，那么，该插槽数据全都不能使用，也无法存储。
+
+redis.conf中的参数 cluster-require-full-coverage
+
+## 集群的Jedis开发
+
+```java
+即使连接的不是主机，集群会自动切换主机存储。主机写，从机读。
+无中心化主从集群。无论从哪台主机写的数据，其他主机上都能读到数据。
+
+public class JedisClusterTest {
+  public static void main(String[] args) { 
+     Set<HostAndPort>set =new HashSet<HostAndPort>();
+     set.add(new HostAndPort("192.168.31.211",6379));
+     JedisCluster jedisCluster=new JedisCluster(set);
+     jedisCluster.set("k1", "v1");
+     System.out.println(jedisCluster.get("k1"));
+  }
+}
+```
+
+## 优点
+
+- 实现扩容
+
+- 分摊压力
+
+- 无中心配置相对简单
+
+## 缺点
+
+- 多键操作是不被支持的 
+
+- 多键的Redis事务是不被支持的。lua脚本不被支持
+
+- 由于集群方案出现较晚，很多公司已经采用了其他的集群方案，而代理或者客户端分片的方案想要迁移至redis cluster，需要整体迁移而不是逐步过渡，复杂度较大。
 
 
 
+# 缓存问题
 
+## 缓存穿透
 
+### 问题描述
 
+key对应的数据在数据源并不存在，每次针对此key的请求从缓存获取不到，请求都会压到数据源，从而可能压垮数据源。比如用一个不存在的用户id获取用户信息，不论缓存还是数据库都没有，若黑客利用此漏洞进行攻击可能压垮数据库。
 
+ ![image-20210528215710373](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210528215710.png)
 
+### 解决方案
 
+一个一定不存在缓存及查询不到的数据，由于缓存是不命中时被动写的，并且出于容错考虑，如果从存储层查不到数据则不写入缓存，这将导致这个不存在的数据每次请求都要到存储层去查询，失去了缓存的意义。
 
+（1）  **对空值缓存：**如果一个查询返回的数据为空（不管是数据是否不存在），我们仍然把这个空结果（null）进行缓存，设置空结果的过期时间会很短，最长不超过五分钟
 
+（2）  **设置可访问的名单（白名单）：**
 
+使用bitmaps类型定义一个可以访问的名单，名单id作为bitmaps的偏移量，每次访问和bitmap里面的id进行比较，如果访问id不在bitmaps里面，进行拦截，不允许访问。
 
+（3）  **采用布隆过滤器**：(布隆过滤器（Bloom Filter）是1970年由布隆提出的。它实际上是一个很长的二进制向量(位图)和一系列随机映射函数（哈希函数）。
+
+布隆过滤器可以用于检索一个元素是否在一个集合中。它的优点是空间效率和查询时间都远远超过一般的算法，缺点是有一定的误识别率和删除困难。)
+
+将所有可能存在的数据哈希到一个足够大的bitmaps中，一个一定不存在的数据会被 这个bitmaps拦截掉，从而避免了对底层存储系统的查询压力。
+
+**（4）**  **进行实时监控：**当发现Redis的命中率开始急速降低，需要排查访问对象和访问的数据，和运维人员配合，可以设置黑名单限制服务
+
+ 
+
+## 缓存击穿
+
+### 问题描述
+
+key对应的数据存在，但在redis中过期，此时若有大量并发请求过来，这些请求发现缓存过期一般都会从后端DB加载数据并回设到缓存，这个时候大并发的请求可能会瞬间把后端DB压垮。
+
+![image-20210528215923844](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210528215923.png)
+
+### 解决方案
+
+key可能会在某些时间点被超高并发地访问，是一种非常“热点”的数据。这个时候，需要考虑一个问题：缓存被“击穿”的问题。
+
+解决问题：
+
+（1）预先设置热门数据：**在redis高峰访问之前，把一些热门数据提前存入到redis里面，加大这些热门数据key的时长
+
+（2）实时调整：现场监控哪些数据热门，实时调整key的过期时长
+
+（3）使用锁：
+
+- 就是在缓存失效的时候（判断拿出来的值为空），不是立即去load db。
+
+- 先使用缓存工具的某些带成功操作返回值的操作（比如Redis的SETNX）去set一个mutex key
+- 当操作返回成功时，再进行load db的操作，并回设缓存,最后删除mutex key；
+- 当操作返回失败，证明有线程在load db，当前线程睡眠一段时间再重试整个get缓存的方法。
+
+ ![image-20210528215939751](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210528215939.png)
+
+## 缓存雪崩
+
+### 问题描述
+
+key对应的数据存在，但在redis中过期，此时若有大量并发请求过来，这些请求发现缓存过期一般都会从后端DB加载数据并回设到缓存，这个时候大并发的请求可能会瞬间把后端DB压垮。
+
+缓存雪崩与缓存击穿的区别在于这里针对很多key缓存，前者则是某一个key
+
+正常访问
+
+ ![image-20210528220015318](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210528220015.png)
+
+缓存失效瞬间
+
+![image-20210528220019381](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210528220019.png)	
+
+### 解决方案
+
+缓存失效时的雪崩效应对底层系统的冲击非常可怕！
+
+**（1）**  **构建多级缓存架构：**nginx缓存 + redis缓存 +其他缓存（ehcache等）
+
+**（2）**  **使用锁或队列：**
+
+用加锁或者队列的方式保证来保证不会有大量的线程对数据库一次性进行读写，从而避免失效时大量的并发请求落到底层存储系统上。不适用高并发情况
+
+**（3）**  **设置过期标志更新缓存：**
+
+记录缓存数据是否过期（设置提前量），如果过期会触发通知另外的线程在后台去更新实际key的缓存。
+
+**（4）**  **将缓存失效时间分散开：**
+
+比如我们可以在原有的失效时间基础上增加一个随机值，比如1-5分钟随机，这样每一个缓存的过期时间的重复率就会降低，就很难引发集体失效的事件。
+
+# 内存淘汰策略
 
 
 
@@ -1230,13 +1628,6 @@ AOF文件持续增长而过大时，会`fork出一条新进程来将文件重写
 
 - 使用Jedis包下 Pipeline类实现
 - 可以通过封装函数式接口操作此类
-
-### 方式2
-
-```java
-```
-
-
 
 ### 方式1
 
