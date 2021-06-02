@@ -1,5 +1,13 @@
 # 启动过程
 
+## 自动装配
+
+### 模式注解
+
+Stereotype Annotation俗称为模式注解，Spring中常见的模式注解有`@Service`，`@Repository`，`@Controller`等，它们都“派生”自`@Component`注解。我们都知道，凡是被`@Component`标注的类都会被Spring扫描并纳入到IOC容器中，那么由`@Component`派生的注解所标注的类也会被扫描到IOC容器中。下面我们主要通过自定义模式注解来了解`@Component`的“派生性”和“层次性”。
+
+#### @Component “派生性”
+
 
 
 
