@@ -1,5 +1,34 @@
 # 启动过程
 
+
+
+
+
+## Bean的创建过程
+
+- `finishBeanFactoryInitialization()`
+  1. `preInstantiateSingletons()`方法
+  2. `getBean()`
+  3. `doGetBean()`
+  4. `createBean()`
+  5. `doCreateBean()`
+
+在`Spring`的启动过程中，会在`refresh()`方法中调用`finishBeanFactoryInitialization()`。在`finishBeanFactoryInitialization`中完成了非懒加载的单例`bean`的创建。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ## 自动装配
 
 ### 模式注解
