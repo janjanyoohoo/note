@@ -10,10 +10,12 @@
 
 @since 2020/9/23
 
+```java`
 while(☀)
 {
    try{again}
 }
+`
 ---
 
 
