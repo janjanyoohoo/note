@@ -1105,6 +1105,10 @@ public class Consumer {
 - 类型：topic
 - 特点：Topic模式是direct模式上的一种叠加，增加了模糊路由RoutingKey的模式。
 
+------
+
+
+
 #### 生产者
 
 ```java
@@ -1112,11 +1116,7 @@ package com.xuexiangban.rabbitmq.routing;
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
-/**
- * @author: 学相伴-飞哥
- * @description: Producer 简单队列生产者
- * @Date : 2021/3/2
- */
+
 public class Producer {
     public static void main(String[] args) {
         // 1: 创建连接工厂

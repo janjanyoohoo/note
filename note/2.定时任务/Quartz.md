@@ -96,6 +96,60 @@ JobDetail与Trigger的name,group
 
 ## 集成SpringBoot
 
+ [spring.io简介](https://docs.spring.io/spring-boot/docs/2.2.13.RELEASE/reference/html/spring-boot-features.html#boot-features-quartz)
+
+```
+Spring Boot offers several conveniences for working with the Quartz scheduler, including the spring-boot-starter-quartz “Starter”. If Quartz is available, a Scheduler is auto-configured (through the SchedulerFactoryBean abstraction).
+
+Beans of the following types are automatically picked up and associated with the Scheduler:
+
+JobDetail: defines a particular Job. JobDetail instances can be built with the JobBuilder API.
+
+Calendar.
+
+Trigger: defines when a particular job is triggered.
+```
+
+### 相关配置
+
+在`application.yml`中配置quartz。相关配置的作用已经写在注释上。
+
+```yaml
+# spring的datasource等配置未贴出
+spring:
+  quartz:
+      # 将任务等保存化到数据库
+      job-store-type: jdbc
+      # 程序结束时会等待quartz相关的内容结束
+      wait-for-jobs-to-complete-on-shutdown: true
+      # QuartzScheduler启动时更新己存在的Job,这样就不用每次修改targetObject后删除qrtz_job_details表对应记录
+      overwrite-existing-jobs: true
+      # 这里居然是个map，搞得智能提示都没有，佛了
+      properties:
+        org:
+          quartz:
+              # scheduler相关
+            scheduler:
+              # scheduler的实例名
+              instanceName: scheduler
+              instanceId: AUTO
+            # 持久化相关
+            jobStore:
+              class: org.quartz.impl.jdbcjobstore.JobStoreTX
+              driverDelegateClass: org.quartz.impl.jdbcjobstore.StdJDBCDelegate
+              # 表示数据库中相关表是QRTZ_开头的
+              tablePrefix: QRTZ_
+              useProperties: false
+            # 线程池相关
+            threadPool:
+              class: org.quartz.simpl.SimpleThreadPool
+              # 线程数
+              threadCount: 10
+              # 线程优先级
+              threadPriority: 5
+              threadsInheritContextClassLoaderOfInitializingThread: true
+```
+
 ### Spring Bean方式
 
 - 通过@Bean 将Trigger与JobDetai对象放入容器中,Scheduler进行组合即可.
@@ -126,6 +180,263 @@ JobDetail与Trigger的name,group
 - 通过自动拾取的方式,对容器中放入Bean,
 - 在JobDetail构建时指定withIdentity("xxx"),并指定为持久化storeDurably()
 - 构建Trigger时指定forJob("xxx") 指定JobDetail的名字
+
+### 新增任务代码示例
+
+#### 周期性任务
+
+```java
+/**
+ * Quartz的相关配置，注册JobDetail和Trigger
+ * 注意JobDetail和Trigger是org.quartz包下的，不是spring包下的，不要导入错误
+ */
+@Configuration
+public class QuartzConfig {
+	/**
+	 *像IOC中注册一个JobDetail 会被自动拾取关联
+	 */
+    @Bean
+    public JobDetail jobDetail() {
+        						//Job任务类
+        JobDetail jobDetail = JobBuilder.newJob(StartOfDayJob.class)
+            	//任务名 / 分组名
+                .withIdentity("start_of_day", "start_of_day")
+            	//持久化
+                .storeDurably()
+                .build();
+        return jobDetail;
+    }
+
+    @Bean
+    public Trigger trigger() {
+        Trigger trigger = TriggerBuilder.newTrigger()
+            	//关联Job
+                .forJob(jobDetail())
+            	//触发器名 / 分组名
+                .withIdentity("start_of_day", "start_of_day")
+            	// 立即执行(非必选)
+                .startNow()
+                // 每天0点执行, 使用Cron调度器
+                .withSchedule(CronScheduleBuilder.cronSchedule("0 0 0 * * ?"))
+                .build();
+        return trigger;
+    }
+}
+
+/**
+ * Job实现类
+ */
+@Component
+public class StartOfDayJob extends QuartzJobBean {
+    private StudentService studentService;
+
+    @Autowired
+    public StartOfDayJob(StudentService studentService) {
+        this.studentService = studentService;
+    }
+
+    @Override
+    protected void executeInternal(JobExecutionContext jobExecutionContext)
+            throws JobExecutionException {
+        // 任务的具体逻辑
+    }
+}
+```
+
+#### 非周期性任务
+
+```java
+/**
+ * 实体类
+ */ 
+public class LeaveApplication {
+    @TableId(type = IdType.AUTO)
+    private Integer id;
+    private Long proposerUsername;
+    @JsonFormat( pattern = "yyyy-MM-dd HH:mm",timezone="GMT+8")
+    private LocalDateTime startTime;
+    @JsonFormat( pattern = "yyyy-MM-dd HH:mm",timezone="GMT+8")
+    private LocalDateTime endTime;
+    private String reason;
+    private String state;
+    private String disapprovedReason;
+    private Long checkerUsername;
+    private LocalDateTime checkTime;
+
+    // 省略getter、setter
+}
+
+/**
+ * 业务逻辑
+ */ 
+@Service
+public class LeaveApplicationServiceImpl implements LeaveApplicationService {
+    @Autowired
+    private Scheduler scheduler;
+    
+    // 省略其他方法与其他依赖
+
+    /**
+     * 动态的添加job和trigger到scheduler
+     */
+    private void addJobAndTrigger(LeaveApplication leaveApplication) {
+        Long proposerUsername = leaveApplication.getProposerUsername();
+        // 创建请假开始Job
+        LocalDateTime startTime = leaveApplication.getStartTime();
+        JobDetail startJobDetail = JobBuilder.newJob(LeaveStartJob.class)
+                // 指定任务组名和任务名
+                .withIdentity(leaveApplication.getStartTime().toString(),
+                        proposerUsername + "_start")
+                // 添加一些参数，执行的时候用
+                .usingJobData("username", proposerUsername)
+                .usingJobData("time", startTime.toString())
+                .build();
+        // 创建请假开始任务的触发器
+        // 创建cron表达式指定任务执行的时间，由于请假时间是确定的，所以年月日时分秒都是确定的，这也符合任务只执行一次的要求。
+        String startCron = String.format("%d %d %d %d %d ? %d",
+                startTime.getSecond(),
+                startTime.getMinute(),
+                startTime.getHour(),
+                startTime.getDayOfMonth(),
+                startTime.getMonth().getValue(),
+                startTime.getYear());
+        CronTrigger startCronTrigger = TriggerBuilder.newTrigger()
+                // 指定触发器组名和触发器名
+                .withIdentity(leaveApplication.getStartTime().toString(),
+                        proposerUsername + "_start")
+                .withSchedule(CronScheduleBuilder.cronSchedule(startCron))
+                .build();
+
+        // 将job和trigger添加到scheduler里
+        try {
+            scheduler.scheduleJob(startJobDetail, startCronTrigger);
+        } catch (SchedulerException e) {
+            e.printStackTrace();
+            throw new CustomizedException("添加请假任务失败");
+        }
+    }
+}
+
+
+/**
+ * Job逻辑
+ */ 
+@Component
+public class LeaveStartJob extends QuartzJobBean {
+    private Scheduler scheduler;
+    private SystemUserMapperPlus systemUserMapperPlus;
+
+    @Autowired
+    public LeaveStartJob(Scheduler scheduler,
+                         SystemUserMapperPlus systemUserMapperPlus) {
+        this.scheduler = scheduler;
+        this.systemUserMapperPlus = systemUserMapperPlus;
+    }
+
+    @Override
+    protected void executeInternal(JobExecutionContext jobExecutionContext)
+            throws JobExecutionException {
+        Trigger trigger = jobExecutionContext.getTrigger();
+        JobDetail jobDetail = jobExecutionContext.getJobDetail();
+        JobDataMap jobDataMap = jobDetail.getJobDataMap();
+        // 将添加任务的时候存进去的数据拿出来
+        long username = jobDataMap.getLongValue("username");
+        LocalDateTime time = LocalDateTime.parse(jobDataMap.getString("time"));
+
+        // 编写任务的逻辑
+		// ...
+        
+        // 执行之后删除任务
+        try {
+            // 暂停触发器的计时
+            scheduler.pauseTrigger(trigger.getKey());
+            // 移除触发器中的任务
+            scheduler.unscheduleJob(trigger.getKey());
+            // 删除任务
+            scheduler.deleteJob(jobDetail.getKey());
+        } catch (SchedulerException e) {
+            e.printStackTrace();
+        }
+    }
+}
+
+```
+
+### 动态控制任务
+
+Quartz中,新增任务是通过Scheduler对象进行关联Job与Trigger启动, 删除时逻辑也大致相同,通过Scheduler对象进行控制
+
+首先需要注入`Scheduler`对象,此对象SringBoot会自动进行配置
+
+> If Quartz is available, a `Scheduler` is auto-configured (through the `SchedulerFactoryBean` abstraction).
+
+- pauseJob(jobKey)
+  - 停止任务
+- resumeJob(jobKey)
+  - 启动任务
+- getJobDetail(jobKey)
+  - 获取jobDetail
+- deleteJob(jobKey)
+  - 删除任务
+- scheduleJob(job,trigger)
+  - 启动任务
+
+```java
+@Autowired
+private Scheduler scheduler;
+rm-uf606gal5e48n965l0o.mysql.rds.aliyuncs.com
+
+```
+
+#### 停止
+
+```java
+public String pause() throws Exception {
+    //创建一个JobKey对象, (开启关闭都通过这个对象),构造方法中传入Job的名称
+    JobKey key = new JobKey("job1");
+    //停止任务
+    scheduler.pauseJob(key);
+
+    return "ok";
+}
+```
+
+#### 启动
+
+```java
+public String start() throws Exception {
+    //创建JobKey
+    JobKey key = new JobKey("job1");
+    //关闭任务
+    scheduler.resumeJob(key);
+
+    return "ok";
+}
+```
+
+#### 修改执行时间
+
+```java
+public String trigger() throws Exception {
+    // 通过Job的name生成JobKey
+    JobKey jobKey = new JobKey("job1");
+    // 通过JobKey先获取JobDetail
+    JobDetail jobDetail = scheduler.getJobDetail(jobKey);
+    // 生成新的 trigger
+    Trigger trigger = TriggerBuilder
+        .newTrigger()
+        .withSchedule(CronScheduleBuilder.cronSchedule("0/1 * * * * ?"))
+        .build();
+    // 通过Jobkey删除任务，不删除会报错。报任务已存在
+    scheduler.deleteJob(jobKey);
+    // 使用新的Trigger启动任务
+    scheduler.scheduleJob(jobDetail, trigger);
+
+    return "ok";
+}
+```
+
+
 
 ## 持久化
 
@@ -342,7 +653,35 @@ Quartz依赖instanceName集群名称进行划分,不同的集群名称下的任�
       - 忽略之前未执行的次数,然后正常执行
     - **withMisFireHandlingInstructionNextWithRemainingCount**()
       - 项目启动后补一次,然后正常执行
+    
   - **其他Trigger**
+  
+  - CronTrigger Misfire
+  
+    - CronTrigger的Misfire有三种如下，可以通过CronSchedulerBuilder设置
+      - `MISFIRE_INSTRUCTION_DO_NOTHING`
+        设置方法：`withMisfireHandlingInstructionDoNothing`
+        含义：不进行补齐,等下次时间到了开始执行
+        - 不触发立即执行
+        - 等待下次Cron触发频率到达时刻开始按照Cron频率依次执行
+  
+      - `MISFIRE_INSTRUCTION_IGNORE_MISFIRE_POLICY`
+        设置方法：`withMisfireHandlingInstructionIgnoreMisfires`
+        含义： 补齐错过的所有次数
+        - 以错过的第一个频率时间立刻开始执行
+        - 重做错过的所有频率周期后
+        - 当下一次触发频率发生时间大于当前时间后，再按照正常的Cron频率依次执行
+  
+      - `MISFIRE_INSTRUCTION_FIRE_ONCE_NOW`
+        设置方法：`withMisfireHandlingInstructionFireAndProceed`
+        含义：立即补一次,然后正常执行
+        - 以当前时间为触发频率立刻触发一次执行
+        - 然后按照Cron频率依次执行
+
+> 默认策略
+> 在SimpleTrigger中已经提到所有trigger的默认Misfire策略都是MISFIRE_INSTRUCTION_SMART_POLICY，SimpleTrigger会根据tirgger的状态来调整具体的Misfire策略
+>
+> 而CronTrigger的默认Misfire策略会被CronTrigger解释为MISFIRE_INSTRUCTION_FIRE_NOW，具体可以参照CronTrigger实现类的源码
 
 ## 任务异常
 
