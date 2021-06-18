@@ -1,3 +1,26 @@
+#### 介绍
+渐渐JanJan的深入学习Java学习笔记
+(非全部原创,部分在学习时摘抄记录自博客/网课等渠道)~
+
+计划内容对于设计模式,JVM,JUC,SpringBoot,SpringCloud,Netty,ORM,Redis,各种中间件的源码以及API的深入学习~
+
+记录个人在学习中的各种文字笔记~Markdown类型笔记为主
+
+📖 今天也是努力学习的渐渐~
+
+@since 2020/9/23
+
+
+while(☀)
+{
+
+   try{again}
+   
+}
+
+---
+
+
 # note
 
 # 备忘录
