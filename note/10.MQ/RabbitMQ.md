@@ -412,6 +412,168 @@ docker logs -f myrabbit
 > more xxx.log  查看日记信息> netstat -naop | grep 5672 查看端口是否被占用> ps -ef | grep 5672  查看进程> systemctl stop 服务
 ```
 
+# 集群
+
+## Docker镜像集群安装
+
+```c
+vi /etc/hostname	//修改hostName
+vi /etc/hosts  		//修改host
+---------------------------------------------------------------------------------
+docker pull rabbitmq:management
+---------------------------------------------------------------------------------
+//启动3个实例,  用link关联三个实例, 此处cookie的引号,必须是英文标点.否则报错Bad characters in cookie
+docker run -d --hostname rabbit1 --name myrabbit1 -p 15672:15672 -p 5672:5672 -e RABBITMQ_ERLANG_COOKIE='mycookie' rabbitmq:management
+    
+docker run -d --hostname rabbit2 --name myrabbit2 -p 15673:15672 -p 5673:5672 --link myrabbit1:rabbit1 -e RABBITMQ_ERLANG_COOKIE='mycookie' rabbitmq:management
+    
+docker run -d --hostname rabbit3 --name myrabbit3 -p 15674:15672 -p 5674:5672 --link myrabbit1:rabbit1 --link myrabbit2:rabbit2 -e RABBITMQ_ERLANG_COOKIE='mycookie' rabbitmq:management
+---------------------------------------------------------------------------------
+//组成普通集群,重启生效
+docker exec -it myrabbit1 bash
+rabbitmqctl stop_app
+rabbitmqctl reset
+rabbitmqctl start_app
+exit
+ 
+docker exec -it myrabbit2 bash
+rabbitmqctl stop_app
+rabbitmqctl reset
+rabbitmqctl join_cluster  rabbit@rabbit1
+rabbitmqctl start_app
+exit
+ 
+docker exec -it myrabbit3 bash
+rabbitmqctl stop_app
+rabbitmqctl reset
+rabbitmqctl join_cluster  rabbit@rabbit1
+rabbitmqctl start_app
+exit
+---------------------------------------------------------------------------------
+//其他一些基本操作
+//在另外其他节点上操作要移除的集群节点
+//rabbitmqctl forget_cluster_node master73@master73
+//集群名称(默认为第一个node名称)修改(任意节点)：
+//rabbitmqctl set_cluster_name rabbitmq_cluster1
+//查看集群状态(任意节点)
+//rabbitmqctl cluster_status
+---------------------------------------------------------------------------------
+//进入任意一个节点设计镜像集群
+docker exec -it myrabbit1 bash
+//全部节点设置为镜像节点, ha-mode 指定为 all
+rabbitmqctl set_policy ha-all "^" '{"ha-mode":"all"}'
+---------------------------------------------------------------------------------
+启动访问
+新建用户并授权,删除guets用户
+
+```
+
+![image-20210618130641295](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210618130641.png)
+
+## HAProxy安装
+
+```c
+---------------------------------------------------------------------------------
+//下载haproxy
+docker pull haproxy
+---------------------------------------------------------------------------------
+//新建文件夹
+mkdir -p /project/haproxy/
+//这里一定要注意，创建的名字一定要为haproxy.cfg，不然后面挂载的时候一直报错
+vi /project/haproxy/haproxy.cfg   
+---------------------------------------------------------------------------------
+//配置文件粘贴内容
+global
+        log 127.0.0.1 local0 info	#[err warning info debug]
+        maxconn 5120  				#默认最大连接数
+        uid 99
+        gid 99
+        daemon						#以后台形式运行haproxy
+        quiet
+        nbproc 20
+        chroot /usr/local/sbin            #chroot运行的路径
+        pidfile /var/run/haproxy.pid    #haproxy的pid存放路径,启动进程的用户必须有权限访问此文件
+defaults
+        log global
+        mode tcp 			#使用4层代理模式，"mode http"为7层代理模式 4层tcp
+        option tcplog 		#if you set mode to tcp,then you nust change tcplog into httplog
+        option dontlognull  #不记录健康检查的日志信息
+        retries 3			#3次连接失败就认为服务不可用，也可以通过后面设置
+        option redispatch   #serverId对应的服务器挂掉后,强制定向到其他健康的服务器
+        maxconn 2000		#最大连接数
+        timeout connect 5s	#连接超时 客户端空闲超时时间为 60秒 则HA 发起重连机制
+        timeout client 60s 	#客户端超时 服务器端链接超时时间为 15秒 则HA 发起重连机制
+        timeout server 15s	#服务器超时 front-end IP for consumers and producters
+        timeout check 2000  #心跳检测超时
+        balance roundrobin  #默认的负载均衡的方式,轮询方式
+      	#balance source     #默认的负载均衡的方式,类似nginx的ip_hash
+      	#balance leastconn  #默认的负载均衡的方式,最小连接
+      	#stats refresh 30   #统计页面刷新间隔
+#listen http_front
+        #bind 0.0.0.0:5669           	#监听端口  
+        #stats refresh 30s           	#统计页面自动刷新时间  
+        #stats uri /haproxy?stats        #统计页面url  
+        #stats realm Haproxy Manager 	#统计页面密码框上提示文本  
+        #stats auth admin:admin      	#统计页面用户名和密码设置  
+        #stats hide-version         	#隐藏统计页面上HAProxy的版本信息
+listen rabbitmq_cluster
+        bind 0.0.0.0:5670 # 监听5670端口转发至rabbitmq节点
+       
+        mode tcp 	#配置TCP模式
+
+		#option tcplog
+        #timeout client  3h
+    	#timeout server  3h
+   	 	#option          clitcpka
+
+        #balance url_param userid
+        #balance url_param session_id check_post 64
+        #balance hdr(User-Agent)
+        #balance hdr(host)
+        #balance hdr(Host) use_domain_only
+        #balance rdp-cookie
+        #balance leastconn
+        #balance source //ip
+        #简单的轮询
+        balance roundrobin  	#负载均衡算法（#banlance roundrobin 轮询，balance source 保存session值，支持static-rr，leastconn，first，uri等参数）
+
+        #rabbitmq集群节点配置
+        #check inter 5000 是检测心跳频率,每隔5秒检查一次，rise 2是2次正确认为服务器可用，fall 3是3次失败认为服务器不可用,并且配置主备机制
+        server myrabbit1 本机内网IP:5672 check inter 5000 rise 2 fall 3
+        server myrabbit2 本机内网IP:5673 check inter 5000 rise 2 fall 3
+        server myrabbit3 本机内网IP:5674 check inter 5000 rise 2 fall 3
+
+listen stats
+        bind 0.0.0.0:8101 # 监听8101端口转发致ha监控服务
+        mode http
+        option httplog
+        stats enable
+       
+        stats uri /rabbitmq-stats		#设置haproxy监控地址为http://ip:8101/rabbitmq-stats
+        stats refresh 5s				#刷新时间
+        stats auth janjan:Zwj19961210  	#ha登录认证信息
+
+listen rabbitmq_admin  
+        bind 0.0.0.0:8001 # 监听8001端口转发至rabbitmq监控服务
+        server myrabbit1 本机内网IP:15672 check inter 5000 rise 2 fall 2
+        server myrabbit2 本机内网IP:15673 check inter 5000 rise 2 fall 2
+        server myrabbit3 本机内网IP:15674 check inter 5000 rise 2 fall 2
+---------------------------------------------------------------------------------
+# 创建docker网络 rabbtimanet 用于haproxy和rabbimq通信
+docker network create rabbitmqnet
+# 查看docker网络列表
+docker network ls
+# 删除可以使用 docker network rm [id]
+---------------------------------------------------------------------------------
+# 端口对应HA配置文件中各端口, 格式: 外部访问端口:配置文件端口   /配置文件挂载路径
+docker run -d -p 8101:8101 -p 5607:5670 -p 8001:8001  -v /project/haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg  --name=haproxy  --net=rabbitmqnet  haproxy
+---------------------------------------------------------------------------------
+访问http://81.70.205.65:8101/rabbitmq-stats
+
+```
+
+![image-20210618130720522](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210618130720.png)
+
 # RabbitMQ概念
 
 ## RabbitMQ的角色分类
