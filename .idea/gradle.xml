@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="GradleMigrationSettings" migrationVersion="1" />
+  <component name="GradleSettings">
+    <option name="linkedExternalProjectsSettings">
+      <GradleProjectSettings>
+        <option name="distributionType" value="DEFAULT_WRAPPED" />
+        <option name="externalProjectPath" value="$PROJECT_DIR$/Hystrix" />
+        <option name="gradleHome" value="$PROJECT_DIR$/../../../Gradle/gradle-7.1" />
+        <option name="gradleJvm" value="#JAVA_HOME" />
+        <option name="modules">
+          <set>
+            <option value="$PROJECT_DIR$/Hystrix" />
+            <option value="$PROJECT_DIR$/Hystrix/hystrix-contrib/hystrix-clj" />
+            <option value="$PROJECT_DIR$/Hystrix/hystrix-contrib/hystrix-codahale-metrics-publisher" />
+            <option value="$PROJECT_DIR$/Hystrix/hystrix-contrib/hystrix-javanica" />
+            <option value="$PROJECT_DIR$/Hystrix/hystrix-contrib/hystrix-junit" />
+            <option value="$PROJECT_DIR$/Hystrix/hystrix-contrib/hystrix-metrics-event-stream" />
+            <option value="$PROJECT_DIR$/Hystrix/hystrix-contrib/hystrix-metrics-event-stream-jaxrs" />
+            <option value="$PROJECT_DIR$/Hystrix/hystrix-contrib/hystrix-network-auditor-agent" />
+            <option value="$PROJECT_DIR$/Hystrix/hystrix-contrib/hystrix-request-servlet" />
+            <option value="$PROJECT_DIR$/Hystrix/hystrix-contrib/hystrix-rx-netty-metrics-stream" />
+            <option value="$PROJECT_DIR$/Hystrix/hystrix-contrib/hystrix-servo-metrics-publisher" />
+            <option value="$PROJECT_DIR$/Hystrix/hystrix-contrib/hystrix-yammer-metrics-publisher" />
+            <option value="$PROJECT_DIR$/Hystrix/hystrix-core" />
+            <option value="$PROJECT_DIR$/Hystrix/hystrix-examples" />
+            <option value="$PROJECT_DIR$/Hystrix/hystrix-examples-webapp" />
+            <option value="$PROJECT_DIR$/Hystrix/hystrix-serialization" />
+          </set>
+        </option>
+      </GradleProjectSettings>
+      <GradleProjectSettings>
+        <option name="distributionType" value="DEFAULT_WRAPPED" />
+        <option name="externalProjectPath" value="$PROJECT_DIR$/janjan-example" />
+        <option name="gradleHome" value="$PROJECT_DIR$/../../../Gradle/gradle-7.1" />
+        <option name="gradleJvm" value="#JAVA_HOME" />
+        <option name="modules">
+          <set>
+            <option value="$PROJECT_DIR$/janjan-example" />
+          </set>
+        </option>
+      </GradleProjectSettings>
+    </option>
+  </component>
+</project>

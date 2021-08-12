@@ -574,6 +574,22 @@ docker run -d -p 8101:8101 -p 5607:5670 -p 8001:8001  -v /project/haproxy/haprox
 
 ![image-20210618130720522](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210618130720.png)
 
+## SpringBoot连接HA
+
+```yml
+spring:
+  rabbitmq:
+    # 连接HA配置监听的cluster端口与host, 此处port需要是docker HA外部映射的端口,host为HA所在服务器host
+    host: 81.70.205.65
+    port: 5607
+    virtual-host: /
+    # 因为配置的账户密码与MQ一致,暂不确定此处是HA账户密码还是MQ账户密码 TODO
+    username: janjan
+    password: Zwj19961210
+```
+
+
+
 # RabbitMQ概念
 
 ## RabbitMQ的角色分类
