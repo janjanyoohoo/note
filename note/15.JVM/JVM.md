@@ -211,18 +211,54 @@
 
 > 直接引用: 指向目标的指针(内存地址/偏移量)
 >
-> 主要涉及: 类,接口,方法.字段等.. 
+> 主要涉及: 类,接口,方法.字段的句柄等.. 
 
 
+
+- **字段**的解析, 简单匹配 `简单名字+描述符同时满足`
+  - 搜索顺序 : `本类 -> 上层接口 -> 父类 -> Object 依次匹配搜索`
+  - 如果找到但没有权限访问(private) 报错 `java.lang.IlleagelAccessError`
+  - 未匹配到报错 `java.lang.NoSuchFieldError`
+
+- **类方法**的解析, 简单匹配 `简单名字+描述符同时满足`
+  - 搜索顺序 : `本类 -> 父类 -> 上层接口 ->  Object 依次匹配搜索`
+  - 在接口中找到方法,但是本类中没有说明当前类是抽象类(1.8此处实现待确认)不能通过对象调用方法,报错`java.lang.AbstractMethodError`
+  - 未匹配到报错 `java.lang.NoSuchMethodError`
+  - 匹配到但是无权限(private) 报错 `java.lang.IlleagelAccessError`
+
+- **接口方法**的解析
+  - 搜索顺序 `本接口->父接口`
+  - 未匹配到报错 `java.lang.NoSuchMethodError`
+  - 接口没有私有方法,所以没有权限校验
+
+> 当父接口与父类有相同的方法,子类调用该方法时会调用父类的方法, 当子类重写方法时会覆盖父类的方法并同时实现接口的该方法.
 
 ### 初始化
 
+> <clinit> 类的初始化,包含静态变量,静态代码块的初始化(ps:如果没有静态变量和静态块则没有<clinit>方法)
+>
+> <init> 实例的初始化,构造器
 
 
 
+### 使用
+
+通过对象调用方法...
+
+### 卸载
+
+垃圾回收器释放
 
 ### JVM内存划分
 
 ![image-20210812223620935](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210812223628.png)
 
 - 方法区: 字符串常量池,静态变量
+
+
+
+
+
+### 引用
+
+![image-20210813225223091](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210813225223.png)
