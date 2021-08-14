@@ -239,8 +239,6 @@
 >
 > <init> 实例的初始化,构造器
 
-
-
 ### 使用
 
 通过对象调用方法...
@@ -249,16 +247,156 @@
 
 垃圾回收器释放
 
-### JVM内存划分
+## JVM内存结构
+
+### 运行时内存结构
 
 ![image-20210812223620935](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210812223628.png)
 
+> 方法区与堆 是存储数据的地方
+>
+> 虚拟机栈,本地方法栈,程序计数器 是执行程序逻辑的
+
 - 方法区: 字符串常量池,静态变量
 
+### 内存结构
+
+![image-20210814143944778](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210814143945.png)
+
+> 本地方法库 netive方法中封装了一些与操作系统有关的方法.
+
+## 类加载器
+
+> 查找顺序,自下向上, 加载顺序自上向下. 
+
+![image-20210814140755201](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210814140755.png)
+
+### 双亲委派模型
+
+![image-20210814151102646](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210814151102.png)
 
 
 
+### Launcher$AppClassLoader
 
-### 引用
+> 应用加载器,用于加载我们编写的类,从classPath下查找,找不到的类依次向上检查
+
+### Launcher$ExtClassLoader
+
+> 扩展类加载器,AppClassLoader的上层加载器,用于加载类路径java_home/lib/ext下的类
+
+### BootStrapClassLoad
+
+> 根加载器,负责加载java/lib中的类,由C语言实现
+
+## 运行时数据区
+
+- 静态编译: 把Java文件编译成字节码文件Class文件.这个时候Class文件以静态文件的方式存在.
+- 类加载器: 把Class字节码文件加载到内存中.
+
+> 类的元数据: 方法描述符 简单名字等存在方法区,存储类的描述信息
+>
+> 实例信息: 存储在堆中
+>
+> 
+
+#### 堆
+
+> 唯一的作用用来存放对方实力,GC发生在这个地方.
+
+![image-20210814165110516](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210814165110.png)
+
+#### 方法区
+
+> 存储类的以描述信息,常量池,静态变量和热点代码
+
+![image-20210814165700051](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210814165700.png)
+
+![image-20210814170012064](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210814170012.png)
+
+> 动态(即时)编译: 将class字节码文件编译成cpu可以执行的命令.
+>
+> JIT: 热点代码编译,将编译后的代码存储到方法区.    ps:避免热点执行的代码每次都要编辑.
+
+#### 程序计数器(寄存器)
+
+> 线程独享,记录当前线程执行到的代码位置
+
+寄存器分为两部分:
+
+- 指令寄存器
+  - 从程序计数器取下一条指令的地址,cpu每执行一条指令都会从指令寄存器取一条指令执行.
+  - 指令寄存器被cpu取走消息后,就会从程序计数器获取下一条指令
+- 程序计数器
+  - 存放下一条指令的地址
+
+![image-20210814170524648](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210814170524.png)
+
+#### 栈
+
+> 栈中存储栈帧,栈帧是程序的调用逻辑
+
+![image-20210814171332959](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210814171333.png)
+
+> 虚拟机栈: 分配基本类型和自定义对象的引用
+>
+> 本地方法栈: 为了Native方法的调用,执行,退出
+>
+> 部分虚拟机不区分虚拟机栈与本地方法栈以及程序计数器--->合为栈区
+
+![image-20210814172305069](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210814172305.png)
+
+#### JVM执行流程
+
+> 调用逻辑: 
+>
+> 加载类放入方法区,创建对象并将方法区类信息句柄存放在堆的对象中,
+>
+> 持有堆中对象引用,通过对象引用调用方法,根据对象引用找到堆中对象,
+>
+> 根据对象中存放的方法区信息引用定位到方法区类信息,获取方法的字节码执行.
 
 ![image-20210813225223091](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210813225223.png)
+
+![image-20210814224441865](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210814224442.png)
+
+![](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210814172811.png)
+
+
+
+## 内存回收
+
+> 垃圾回收发生在堆与方法区内. 栈区属于线程私有数据所以不会进行回收.
+
+>  打印GC日志信息命令
+>
+> > -XX:PrintGCDetails  -XX:UseSerialGC  //打印GC信息,序列化执行
+> >
+> > -XX:PrintGC //简略的GC信息
+> >
+> > -XX:P日内同
+> >
+> > GC日志解读:
+> >
+> > ![image-20210814232609799](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210814232609.png)
+
+### Java引用类型
+
+- 强引用
+  - A  a = new A() 常规引用属于强引用,只要引用还在就不会回收对象
+- 弱引用
+  - 生存到下一次垃圾回收前,无论当前内存是否够用,都会回收到弱关联的引用
+- 软引用
+  - 在发生内存溢出前,进行回收. 如果这次回收还没有足够的内存则抛出OOM
+- 虚引用
+  - 不会对对象的声明周期有影响.也无法通过它得到对象实例,唯一作用是在对象被垃圾回收前收到一个系统通知
+
+### 引用计数
+
+给对象添加一个引用计数器,每当对这个对象进行一次引用,计数器就会+1,每当引用失效的时候,引用计数器-1,每当这个计数器=0的时候,表示这个对象不会再被引用.
+
+> 循环引用->  A内部引用B  B内部引用A A置位null,B置位null.
+
+### 可达性分析
+
+- 可达性分析算法
