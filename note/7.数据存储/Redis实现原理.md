@@ -1,4 +1,4 @@
-## 数据结构
+# 数据结构
 
 ## 简单动态字符串
 
@@ -79,3 +79,123 @@ struct sdshdr{
 > 发布与订阅/慢查询/监视器/客户端状态信息也使用到链表
 
 当列表键包含数量比较多的元素,或者列表中包含的元素都是比较长的字符串时,Redis使用链表作为列表的底层实现.
+
+### 链表和链表节点实现
+
+```c
+typedef struct listNode{
+    //上一个节点
+    struct listNode *prev;
+    //下一个节点
+    struct listNode *next;
+    //节点的值
+    void *value;  
+}
+```
+
+> listNode通过 prev 与 next指针组成双端列表.
+
+```c
+typedef struct list{
+    
+    //表头节点
+    listNode *head;
+    //表尾节点
+    listNode *tail;
+    //链表所包含的节点数量
+    unsigned long len;
+    //节点值复值函数,用于复制链表节点所保存的值
+    void *(*dup) (void *ptr);
+    //节点值释放函数,用于释放链表节点上所保存的值
+    void *(*free) (void *ptr);
+    //节点值对比函数,用于对比链表节点的值与另一个输入值是否相等
+    int (*match) (void *ptr,void *key);
+} list;
+```
+
+### 特性
+
+- 双端,获取前置与后置节点的时间复杂度O(1)
+- 无环,头prev尾next为null; 以null作为终点
+- 带表头与表尾指针
+- 带链表长度计数器. 获取长度时间复杂度O(1)
+- 多态,可以保存各种不同类型的值
+
+## 字典
+
+> 又称符号表/Map.一种用于保存键值对的抽象数据结构.
+>
+> 字典的底层使用哈希表作为实现.
+>
+> 字典是hash的底层存储结构之一.
+
+- 每个键独一无二
+- 每个值关联一个键
+
+> Redis的数据库就是使用字典实现的.对数据库的CRUD是构建在字典的操作之上
+
+### 哈希表
+
+```c
+typedef struct dictht{
+    //哈希表数组,
+    dictEntiy **table;
+    //哈希表的大小
+    unsigned long size;
+    //哈希表的大小掩码,用于计算索引值
+    //总是等于size-1,这个属性决定key放到哪个索引上.  hash && size-1
+    unsigned long sizemask;
+    //该哈希表已有节点的数量
+    unsigned long used;
+}dictht;
+```
+
+### 哈希表节点
+
+```c
+typedef struct dictEntry{
+    //键
+    void *key;
+    //值
+    union {
+        void *val;
+        unit64_t u64;
+        int64_t s64;
+    }v;
+    
+    //指向下一个哈希表节点  形成链表
+    struct dictEntry *next;
+}dictEntry;
+```
+
+- key保存键值对中的键,而v属性保存着键值对的值,其中的值可以是一个指针或者uint_64/int_64证书
+- next属性是指向另一个哈希表的节点指针,可以将多个哈希值相同的键值对连接在一起.以此来解决哈希冲突的问题
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

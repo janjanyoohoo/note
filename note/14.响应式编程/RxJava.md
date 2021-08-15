@@ -580,3 +580,247 @@ void test_count(){
 5
 ```
 
+## 功能性操作符
+
+> 辅助被观察者（`Observable`） 在发送事件时实现一些功能性需求
+>
+> > 如错误处理、线程调度等等
+
+![img](https://upload-images.jianshu.io/upload_images/944365-c85e2f762b19344d.png?imageMogr2/auto-orient/strip|imageView2/2/format/webp)
+
+### 类型
+
+`RxJava 2`常见的功能性操作符 主要有：
+
+![img](https://upload-images.jianshu.io/upload_images/944365-ff3df2b42968833d.png?imageMogr2/auto-orient/strip|imageView2/2/format/webp)
+
+### subscribe（）
+
+>  连接被观察者 & 观察者;订阅
+
+```java
+//链式调用示例
+Observable.just(1,2,3,4,5)
+    .collect(()->{
+        return new ArrayList();
+    }, (o1,o2)->{
+        o1.add(o2);
+    }).subscribe(new BiConsumer<ArrayList, Throwable>() {
+    @Override
+    public void accept(ArrayList arrayList, Throwable throwable) throws Exception {
+        System.out.println(arrayList.toString());
+    }
+});
+```
+
+#### 扩展
+
+> 内部实现
+
+```java
+<-- Observable.subscribe(Subscriber) 的内部实现 -->
+
+public Subscription subscribe(Subscriber subscriber) {
+    subscriber.onStart();
+    // 在观察者 subscriber抽象类复写的方法 onSubscribe.call(subscriber)，用于初始化工作
+    // 通过该调用，从而回调观察者中的对应方法从而响应被观察者生产的事件
+    // 从而实现被观察者调用了观察者的回调方法 & 由被观察者向观察者的事件传递，即观察者模式
+    // 同时也看出：Observable只是生产事件，真正的发送事件是在它被订阅的时候，即当 subscribe() 方法执行时
+}
+```
+
+### 线程调度
+
+> 快速、方便指定 & 控制被观察者 & 观察者 的工作线程
+
+#### 作用
+
+> 指定 被观察者 `（Observable）` / 观察者`（Observer）` 的工作线程类型。
+
+#### QA:
+
+##### 为什么要进行RxJava线程控制（调度 / 切换）
+
+1. 背景
+
+- 在 `RxJava`模型中，**被观察者 `（Observable）` / 观察者`（Observer）`的工作线程 = 创建自身的线程**
+
+> 即，若被观察者 `（Observable）` / 观察者`（Observer）`在主线程被创建，那么他们的工作（生产事件 / 接收& 响应事件）就会发生在主线程
+
+- 因为创建被观察者 `（Observable）` / 观察者`（Observer）`的线程 = 主线程
+- 所以生产事件 / 接收& 响应事件都发生在主线程
+
+2. 冲突
+
+对于一般的需求场景，需要在子线程中实现耗时的操作；然后回到主线程实现操作
+
+应用到 `RxJava`模型中，可理解为：
+
+1. 被观察者 `（Observable）` 在 **子线程** 中生产事件（如实现耗时操作等等）
+2. 观察者`（Observer）`在 **主线程** 接收 & 响应事件（即实现操作）
+
+> 工作在不同线程上协同工作
+
+![img](https://upload-images.jianshu.io/upload_images/944365-3997d7540acda975.png?imageMogr2/auto-orient/strip|imageView2/2/format/webp)
+
+3. 解决方案
+
+所以，为了解决上述冲突，即实现 **真正的异步操作**，我们需要对`RxJava`进行 **线程控制（也称为调度 / 切换）**
+
+4. 实现方式
+
+采用 `RxJava`内置的**线程调度器**（ `Scheduler` ），即通过 **功能性操作符`subscribeOn（）` & `observeOn（）`**实现
+
+5. 功能性操作符subscribeOn（） & observeOn（）
+
+> 线程控制，即指定 被观察者 `（Observable）` / 观察者`（Observer）` 的工作线程类型
+
+6. 线程类型
+
+在 `RxJava`中，内置了多种用于调度的线程类型
+
+| 类型                     |       含义       |                                                应用场景 |
+| ------------------------ | :--------------: | ------------------------------------------------------: |
+| Schedulers.single()      |                  |                                                         |
+| Schedulers.newThread()   |    常规新线程    |                                              耗时等操作 |
+| Schedulers.io()          |    io操作线程    |                        网络请求、读写文件等io密集型操作 |
+| Schedulers.computation() | CPU计算操作线程  |                                            大量计算操作 |
+| Schedulers.trampoline()  |     当前线程     | 加入当前线程执行,注意如果当前是新线程则是在新线程中执行 |
+| Executor Scheduler       | 自定义的IO调度器 |                指定线程池的大小来创建一个自定义的线程池 |
+
+详解
+
+```text
+IO
+最常见的调度器之一。用于IO相关操作。比如网络请求和文件操作。IO 调度器背后由线程池支撑。
+它首先创建一个工作线程，可以复用于其他操作。当然，当这个工作线程(长时间任务的情况)不能被复用时，会创建一个新的线程来处理其他操作。这个好处也会带来一些问题，因为它允许创建的线程是无限的，所以当创建大量线程的时候，会对整体性能造成一些影响。不过IO调度器仍然不失为一个好用的调度器。使用如下：
+
+observable.subscribeOn(Schedulers.io())
+```
+
+```text
+Computation
+这个调度器和IO调度器非常相似，因其也是由线程池支持的。然鹅，其可用的线程数是固定的，和系统的cpu核数目保持一致。所以如果你的手机是双核的，那么线程池中就有两个线程。这也意味着如果这两条线程都处于忙碌状态，那么该进程将会等待线程变成空闲状态的时候才能处理其他操作。因为这个限制，它不太适合IO相关操作。适用于进行一些计算操作，计算速度还很快。使用如下：
+
+observable.subscribeOn(Schedulers.newThread())
+```
+
+```text
+Single
+此款调度器非常简单，由一个线程支持。所以无论有多少个observables,都将只运行在这个线程上。也可将其认为是主线程的一个替代，使用如下：
+
+observable.subscribeOn(Schedulers.single())
+```
+
+```text
+Immediate
+此款调度器在当前活跃线程以阻塞的方式开始其任务(rxjava2已将其移除),无视当前运行的任务。使用如下:
+
+observable.subscribeOn(Schedulers.immediate())
+```
+
+```text
+Trampoline
+此款调度器运行在当前线程，所以如果你有代码运行在主线程上，它会将将要运行的代码块添加到主线程的队列。和Immediate非常相似，不同的是Immediate会阻塞此线程，而Trampoline会等待当前任务执行完成。适用用于不止一个observables，并且希望它们能够按照顺序执行的场景。
+
+Observable.just(1,2,3,4)
+    .subscribeOn(Schedulers.trampoline())
+    .subscribe(onNext);
+ Observable.just( 5,6, 7,8, 9)
+    .subscribeOn(Schedulers.trampoline())
+    .subscribe(onNext);
+ Output:
+    Number = 1
+    Number = 2
+    Number = 3
+    Number = 4
+    Number = 5
+    Number = 6
+    Number = 7
+    Number = 8
+    Number = 9
+
+observable.subscribeOn(Schedulers.trampoline())
+```
+
+```text
+Executor Scheduler
+更像是一种自定义的IO调度器。我们可以通过制定线程池的大小来创建一个自定义的线程池。适用于observables的数量对于IO调度器太多的场景使用，使用如下：
+
+Executors executor = Executors.newFixedThreadPool(10) 
+Schedulers pooledScheduler = Schedulers.from(executor)
+```
+
+
+
+- RXJava2中的Scheduler部分实现
+
+![image-20210815174045317](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210815174045.png)
+
+> - 注：`RxJava`内部使用 **线程池** 来维护这些线程，所以线程的调度效率非常高。
+
+7. 具体使用
+
+> - 具体是在 （上述步骤3）**通过订阅（subscribe）连接观察者和被观察者**中实现
+
+```java
+<-- 使用说明 -->
+// Observable.subscribeOn（Schedulers.Thread）：指定被观察者 发送事件的线程（传入RxJava内置的线程类型）
+// Observable.observeOn（Schedulers.Thread）：指定观察者 接收 & 响应事件的线程（传入RxJava内置的线程类型）
+```
+
+```java
+@Test
+void test_thread() throws InterruptedException {
+    Observer<Integer> observer = new Observer<Integer>() {
+        @Override
+        public void onSubscribe(@NonNull Disposable d) {
+
+        }
+
+        @Override
+        public void onNext(@NonNull Integer o) {
+            System.out.println(Thread.currentThread().getName()+" 接收线程");
+            System.out.println(o);
+        }
+
+        @Override
+        public void onError(@NonNull Throwable e) {
+
+        }
+
+        @Override
+        public void onComplete() {
+            System.out.println(Thread.currentThread().getId()+" done");
+        }
+    };
+
+    Observable<Integer> observable = Observable.create(new ObservableOnSubscribe<Integer>() {
+        @Override
+        public void subscribe(@NonNull ObservableEmitter<Integer> emitter) throws Exception {
+            System.out.println(Thread.currentThread().getName()+" 发送线程");
+            emitter.onNext(1);
+            emitter.onNext(2);
+            emitter.onNext(3);
+            emitter.onNext(4);
+            emitter.onNext(5);
+            emitter.onComplete();
+        }
+    });
+
+   	//注意此处线程trampoline的特性的先后使用的区别 
+    observable.subscribeOn(Schedulers.newThread())
+        .observeOn(Schedulers.trampoline())
+        .subscribe(observer);
+}
+----------------------------------
+        
+subscribeOn(Schedulers.newThread()) .observeOn(Schedulers.trampoline()) 时执行结果
+RxNewThreadScheduler-1 发送线程
+RxNewThreadScheduler-1 接收线程
+    
+subscribeOn(Schedulers.trampoline()) .observeOn(Schedulers.newThread()) 时执行结果
+main 发送线程
+RxNewThreadScheduler-1 接收线程
+```
+
