@@ -380,6 +380,10 @@
 > >
 > > ![image-20210814232609799](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210814232609.png)
 
+### 内存区域
+
+![image-20210815224529076](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210815224529.png)
+
 ### Java引用类型
 
 - 强引用
@@ -488,12 +492,208 @@
 
 ![image-20210815224552876](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210815224553.png)
 
+### Savepoint安全点
 
+>  STW :stop the world(正常执行的用户线程全部停止)
+>
+>  安全点是进行GC的点,OopMap
 
+1. 抢先式中断
+   1. 缺点 sleep wait的线程不会到达安全点
+2. 主动式中断
 
+![image-20210816221618115](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210816221737.png)
 
+## 垃圾收集器
 
+### 参数
 
+```c
+-XX:+Use{垃圾回收器名称}GC  //指定使用的垃圾回收器
+-XX:+PrintGCDetails   //打印GC日志
+-XX:+PrintGC			//打印简单GC日志
+```
 
+> 新生代和老年代都会STW
 
-![image-20210815224529076](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210815224529.png)
+### Serial 串行收集器
+
+> 单线程的收集
+>
+> Ed +S1+S0 使用的都是赋值算法,内存小速度快
+>
+> Old 使用标记整理算法
+
+![image-20210816224247267](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210816224247.png)
+
+### ParNew收集器
+
+> 并行收集,但是老年代仍然是单线程收集的,收集过程中STW
+
+![image-20210816225810546](C:/Users/jianjian/AppData/Roaming/Typora/typora-user-images/image-20210816225811778.png)
+
+### ParallelScavenge收集器
+
+- 主要优点: 可以控制代码的吞吐量
+
+吞吐量计算公式: 运行用户代码的时间 / (运行用户代码的时间+垃圾收集时间) 可以控制GC时用户线程停顿的时间
+
+```java
+-XX:MaxxGCPauseMillis    //最大垃圾收集停顿时间(大于0毫秒数)
+-XX:GCTimeRatio			//吞吐量大小,(大于0且小于100整数,吞吐量百分比)
+-XX:+UseAdaptiveSizePolicy	//内存调优委托给虚拟机管理
+```
+
+例: 吞吐量99% = (用户代码运行99分钟 / (用户代码运行99分钟 + GC时间) = 100分总)
+
+> 并行的垃圾收集器,
+
+### ParallelOld收集器
+
+> 对老年代并行收集的收集器
+
+![image-20210816232212035](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210816232212.png)
+
+### Serial Old收集器
+
+![image-20210816232126657](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210816232127.png)
+
+### Concurrent Mark Sweep垃圾收集器
+
+**适用场景:Web**
+
+> 只能够在老年代适用
+
+- 开启CMS收集器 `-XX:+UseConcMarkSweepGC`
+
+![image-20210824225148520](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210824225156.png)
+
+- 初始标记(STW)
+  - CMS在初始标记时标记根节点为`黑色`,子节点标记为`灰色`.
+- 并发标记
+  - 在并发标记时,CMS继续标记,将子节点标记为黑色,子子节点标记为灰色,递归标记.未被标记到的则是`白色,`说明不可达.
+- 重新标记(STW)
+  - 进行STW,停止用户线程,防止在重新标记时用户线程产生新的垃圾
+  - 进行可达性分析
+  - 对于被标记为清理对象后又被进行赋值引用的对象重新标记;例如`a = null; ...  a=new A();`
+- 并发清除
+
+##### 优点
+
+> 低停顿
+
+- -XX:UseCMSCompactAtFullCollection 在FullGC后进行一次整理
+- -XX:CMSFullGCsBeforeCompaction 在执行多少次FullGC之后进行一次整理操作
+- -XX: ...其他参数
+
+##### 缺点
+
+> 并发清理容易产生碎片,可以通过参数修改
+
+### G1收集器
+
+G1仍然属于分代收集器,只是把内存空间分为多个Region,最大优点是空间整合.
+
+> G1的新生代老年代G1G0等分布与传统垃圾收集器不同
+
+- 开启G1 -XX:UseG1GC
+
+![](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210824234007.png)
+
+![image-20210825204635742](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210825204635.png)
+
+ #### YoungGC
+
+1. 扫描根 GC Roots
+2. 更新RememberSet 记录回收对象的数据结构
+3. 检测RemeberSet哪些数据需要从年轻代到老年代,或者需要到幸存代
+4. 拷贝对象,to幸存代,to老年代
+
+### 垃圾收集器组合关系与使用区域
+
+> Serial - ParNew - Parallel Scavenge 只能在新生代适用
+>
+> CMS - SerialOld - ParallelOld 只能在老年代使用
+>
+> ParNew 可以和三种老年代收集器组合使用.
+
+![image-20210816232630876](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210816232631.png)
+
+## JVM内存分配
+
+> 对象会首先进入新生代Eden区,大对象则直接进入老年代
+
+![image-20210825215408152](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210825215408.png)
+
+- 大对象进入老年代
+
+  > -XX:PretenureSizeThreshold=n 如果对象尺寸大于这个阈值(字节),则直接进入老年代
+  >
+  > 注意:这个参数只能在ParNew和Serial这两款收集器起作用
+
+- 长期存活对象
+
+  > -XX:MaxTenuringThreshold 一个对象经理多少次GC会进入老年代,默认值15
+
+- 对象年龄动态判断
+
+  > 如果在Survivor空间中相同年龄所有对象大小综合大于Survivor的一半,年龄大于等于该年龄的对象可以直接进入老年代.无语等到MaxTenuringThreadshold中要求的年龄.
+
+- 空间分配担保
+
+  > HandlePromotionFailure 检查老年代最大可用的连续空间是否大于历次晋升到老年代对象的平均大小,如果大于,将尝试进行一次MinorGC 如果小于或者设置不允许冒险.那么将执行一次FullGC
+
+  1. 在MinorGC之前,检查老年代最大可用连续空间是否大于新生代所有对象的大小
+  2. 执行MinorGC
+  3. 如果空间不够
+     1. 检查HandlePromotionFailure是否开启
+        1. 未开启->执行FullGC ->仍旧不够 OOM
+        2. 开启-> 检查老年代最大可用连续空间是否大于历次晋升到老年代对象的平均大小.
+        3.  如果大于,则试着执行MinorGC
+        4. 如果小于,则FullGC
+
+  **最终目的减少FullGC次数**
+
+  ![image-20210825214241478](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210825214241.png)
+
+> 如果经过FullGC还是没有足够的空间则OOM
+
+## Java字节码执行
+
+### 字节码执行模式
+
+> java字节码是混合执行模式(解释执行和编译执行)
+
+![image-20210826223417329](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210826223417.png)
+
+### 运行时栈结构
+
+![image-20210826223353890](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210826223354.png)
+
+### 局部变量表
+
+![image-20210826225722446](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210826225722.png)
+
+#### 本地变量执行逻辑
+
+> 本地变量表中标识本地变量存储在那个slot中,32位以内的变量占用1个槽.64的占用2个.
+>
+> 执行方法到变量时,虚拟机会从本地变量表load变量,压入到操作数栈中执行.
+
+操作数栈与虚拟机栈都是栈结构,本地变量表不是.
+
+![image-20210826231918333](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210826231918.png)
+
+> long 与 double 在32位系统中需要2个slot存储,不是原子的操作. 64位操作系统不存在这个问题.
+
+### 操作数栈
+
+![image-20210826230921746](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210826230922.png)
+
+### 方法返回地址
+
+- 方法遇到返回指令 return
+- 方法遇到异常
+
+![image-20210826231103809](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210826231104.png)
+
