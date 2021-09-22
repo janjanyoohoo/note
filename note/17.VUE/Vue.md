@@ -677,3 +677,239 @@ vm.$watch('isHot',(newValue,oldValue)=>{
 </html>
 ```
 
+## 条件渲染
+
+条件渲染：
+
+1. `v-if`
+   写法：
+   1. `v-if`="表达式" 
+   2. `v-else-if`="表达式"
+   3. `v-else`
+
+> 适用于：切换频率较低的场景
+>
+> 特点：不展示的DOM元素直接被移除。
+>
+> 注意：v-if可以和:v-else-if、v-else一起使用，但要求结构不能被“打断”。v-else不带条件
+
+2. `v-show`
+   写法：v-show="表达式"
+
+> 适用于：切换频率较高的场景。
+> 特点：不展示的DOM元素未被移除，仅仅是使用样式隐藏掉
+
+3. 备注：使用v-if的时，元素可能无法获取到，而使用v-show一定可以获取到。
+
+```java
+		<div id="root">
+			<h2>当前的n值是:{{n}}</h2>
+			<button @click="n++">点我n+1</button>
+			<!-- 使用v-show做条件渲染 -->
+			<!-- <h2 v-show="false">欢迎来到{{name}}</h2> -->
+			<!-- <h2 v-show="1 === 1">欢迎来到{{name}}</h2> -->
+
+			<!-- 使用v-if做条件渲染 -->
+			<!-- <h2 v-if="false">欢迎来到{{name}}</h2> -->
+			<!-- <h2 v-if="1 === 1">欢迎来到{{name}}</h2> -->
+
+			<!-- v-else和v-else-if -->
+			<!-- <div v-if="n === 1">Angular</div>
+			<div v-else-if="n === 2">React</div>
+			<div v-else-if="n === 3">Vue</div>
+			<div v-else>哈哈</div> -->
+
+			<!-- v-if与template的配合使用 -->
+			<template v-if="n === 1">
+				<h2>你好</h2>
+				<h2>尚硅谷</h2>
+				<h2>北京</h2>
+			</template>
+		</div>
+
+	<script type="text/javascript">
+		const vm = new Vue({
+			el:'#root',
+			data:{
+				name:'尚硅谷',
+				n:0
+			}
+		})
+	</script>
+```
+
+## 列表
+
+`v-for`遍历指令
+
+1. 用于展示列表数据
+2. 语法：`v-for="(item, index) in xxx" :key="yyy"`
+   1. key不可以使用index,应该使用唯一的ID,否则渲染会出现混乱
+3. 可遍历：数组、对象、字符串（用的很少）、指定次数（用的很少）
+
+---
+
+key的原理
+
+>1. 虚拟DOM中key的作用：
+>									key是虚拟DOM对象的标识，当数据发生变化时，Vue会根据【新数据】生成【新的虚拟DOM】, 
+>									随后Vue进行【新虚拟DOM】与【旧虚拟DOM】的差异比较，比较规则如下：
+>2. 对比规则：
+>      								(1).旧虚拟DOM中找到了与新虚拟DOM相同的key：
+>      											①.若虚拟DOM中内容没变, 直接使用之前的真实DOM！
+>      											②.若虚拟DOM中内容变了, 则生成新的真实DOM，随后替换掉页面中之前的真实DOM。
+>3. 用index作为key可能会引发的问题：
+>      										1. 若对数据进行：逆序添加、逆序删除等破坏顺序操作:
+>      														会产生没有必要的真实DOM更新 ==> 界面效果没问题, 但效率低。
+>         										2. 如果结构中还包含输入类的DOM：
+>                      	会产生错误DOM更新 ==> 界面有问题。
+>4. 开发中如何选择key?:
+>      1. 最好使用每条数据的唯一标识作为key, 比如id、手机号、身份证号、学号等唯一值。
+>      2. 如果不存在对数据的逆序添加、逆序删除等破坏顺序操作，仅用于渲染列表用于展示，
+>
+>使用index作为key是没有问题的。
+
+### 列表渲染
+
+```javascript
+<div id="root">
+			<!-- 遍历数组 -->
+			<h2>人员列表（遍历数组）</h2>
+			<ul>
+				<li v-for="(p,index) of persons" :key="index">
+					{{p.name}}-{{p.age}}
+				</li>
+			</ul>
+
+			<!-- 遍历对象 -->
+			<h2>汽车信息（遍历对象）</h2>
+			<ul>
+				<li v-for="(value,k) of car" :key="k">
+					{{k}}-{{value}}
+				</li>
+			</ul>
+
+			<!-- 遍历字符串 -->
+			<h2>测试遍历字符串（用得少）</h2>
+			<ul>
+				<li v-for="(char,index) of str" :key="index">
+					{{char}}-{{index}}
+				</li>
+			</ul>
+			
+			<!-- 遍历指定次数 -->
+			<h2>测试遍历指定次数（用得少）</h2>
+			<ul>
+				<li v-for="(number,index) of 5" :key="index">
+					{{index}}-{{number}}
+				</li>
+			</ul>
+</div>
+
+		<script type="text/javascript">
+			new Vue({
+				el:'#root',
+				data:{
+					persons:[
+						{id:'001',name:'张三',age:18},
+						{id:'002',name:'李四',age:19},
+						{id:'003',name:'王五',age:20}
+					],
+					car:{
+						name:'奥迪A8',
+						price:'70万',
+						color:'黑色'
+					},
+					str:'hello'
+				}
+			})
+		</script>
+```
+
+### 列表过滤
+
+```javascript
+//watch实现  (不推荐)
+new Vue({
+    el:'#root',
+    data:{
+        keyWord:'',
+        persons:[
+            {id:'001',name:'马冬梅',age:19,sex:'女'},
+            {id:'002',name:'周冬雨',age:20,sex:'女'},
+            {id:'003',name:'周杰伦',age:21,sex:'男'},
+            {id:'004',name:'温兆伦',age:22,sex:'男'}
+        ],
+        filPerons:[]
+    },
+    watch:{
+        keyWord:{
+            immediate:true,
+            handler(val){
+                this.filPerons = this.persons.filter((p)=>{
+                    return p.name.indexOf(val) !== -1
+                })
+            }
+        }
+    }
+})  
+//用computed实现 (推荐)
+new Vue({
+    el:'#root',
+    data:{
+        keyWord:'',
+        persons:[
+            {id:'001',name:'马冬梅',age:19,sex:'女'},
+            {id:'002',name:'周冬雨',age:20,sex:'女'},
+            {id:'003',name:'周杰伦',age:21,sex:'男'},
+            {id:'004',name:'温兆伦',age:22,sex:'男'}
+        ]
+    },
+    computed:{
+        filPerons(){
+            return this.persons.filter((p)=>{
+                return p.name.indexOf(this.keyWord) !== -1
+            })
+        }
+    }
+}) 
+```
+
+### 列表排序
+
+```javascript
+<ul>
+    <li v-for="(p,index) of filPerons" :key="p.id">
+        {{p.name}}-{{p.age}}-{{p.sex}}
+    	<input type="text">
+	</li>
+</ul>
+new Vue({
+    el:'#root',
+    data:{
+        keyWord:'',
+        sortType:0, //0原顺序 1降序 2升序
+        persons:[
+            {id:'001',name:'马冬梅',age:30,sex:'女'},
+            {id:'002',name:'周冬雨',age:31,sex:'女'},
+            {id:'003',name:'周杰伦',age:18,sex:'男'},
+            {id:'004',name:'温兆伦',age:19,sex:'男'}
+        ]
+    },
+    computed:{
+        filPerons(){
+            const arr = this.persons.filter((p)=>{
+                return p.name.indexOf(this.keyWord) !== -1
+            })
+            //判断一下是否需要排序
+            if(this.sortType){
+                arr.sort((p1,p2)=>{
+                    return this.sortType === 1 ? p2.age-p1.age : p1.age-p2.age
+                })
+            }
+            return arr
+        }
+    }
+}) 
+```
+
