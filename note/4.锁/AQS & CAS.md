@@ -196,7 +196,7 @@ public final boolean hasQueuedPredecessors() {
                 return node;
             }
         }
-        //队列没有进行初始化,传递当前节点到enq方法
+        //队列没有进行初始化,传递当前节点到enq方法,入队尾失败CAS尝试入队尾.
         enq(node);
         //返回当前节点
         return node;

@@ -756,12 +756,12 @@ key的原理
 >									随后Vue进行【新虚拟DOM】与【旧虚拟DOM】的差异比较，比较规则如下：
 >2. 对比规则：
 >      								(1).旧虚拟DOM中找到了与新虚拟DOM相同的key：
->      											①.若虚拟DOM中内容没变, 直接使用之前的真实DOM！
->      											②.若虚拟DOM中内容变了, 则生成新的真实DOM，随后替换掉页面中之前的真实DOM。
+>           											①.若虚拟DOM中内容没变, 直接使用之前的真实DOM！
+>           											②.若虚拟DOM中内容变了, 则生成新的真实DOM，随后替换掉页面中之前的真实DOM。
 >3. 用index作为key可能会引发的问题：
 >      										1. 若对数据进行：逆序添加、逆序删除等破坏顺序操作:
->      														会产生没有必要的真实DOM更新 ==> 界面效果没问题, 但效率低。
->         										2. 如果结构中还包含输入类的DOM：
+>           														会产生没有必要的真实DOM更新 ==> 界面效果没问题, 但效率低。
+>                 										2. 如果结构中还包含输入类的DOM：
 >                      	会产生错误DOM更新 ==> 界面有问题。
 >4. 开发中如何选择key?:
 >      1. 最好使用每条数据的唯一标识作为key, 比如id、手机号、身份证号、学号等唯一值。
@@ -912,4 +912,275 @@ new Vue({
     }
 }) 
 ```
+
+## 监测数据
+
+Vue监视数据的原理：
+   1. vue会监视`data中所有层次的数据`。
+
+   2. 如何监测对象中的数据？
+
+         				1. 通过`setter`实现监视，且要在new Vue时就传入要监测的数据。
+
+      - **对象中后追加的属性，Vue默认不做响应式处理**
+      - 如需给后添加的属性做响应式，请使用如下API：
+        - `Vue.set(target，propertyName/index，value) `
+        - `vm.$set(target，propertyName/index，value)`
+
+   3. 如何监测数组中的数据？
+
+         				1. 通过**包裹数组更新元素的方法实现**，本质就是做了两件事：
+                - 调用原生对应的方法对数组进行更新。
+                - 重新解析模板，进而更新页面。
+
+   4. 在Vue修改数组中的某个元素一定要用如下方法：
+
+         				1. 使用这些API:`push()`、`pop()`、`shift()`、`unshift()`、`splice()`、`sort()`、`reverse()`
+         				2. `Vue.set() 或 vm.$set()`
+                			
+
+> 特别注意：`Vue.set()` 和 `vm.$set() `**不能给vm 或 vm的根数据对象 添加属性！！！**
+
+```javascript
+Vue.set(this.student,'sex','男')
+this.$set(this.student,'sex','男')
+```
+
+## 收集表单数据
+
+1. `<input type="text"/>`，则v-model收集的是value值，用户输入的就是value值。
+2. `<input type="radio"/>`，则v-model收集的是value值，且要给标签配置value值。
+3. `<input type="checkbox"/>`
+   - 没有配置input的value属性，那么收集的就是checked（勾选 or 未勾选，是布尔值）
+   - 配置input的value属性:
+     - -model的初始值是非数组，那么收集的就是checked（勾选 or 未勾选，是布尔值）
+     - v-model的初始值是数组，那么收集的的就是value组成的数组
+
+> `v-model`的三个修饰符：
+>
+> - `lazy`：失去焦点再收集数据
+> - `number`：输入字符串转为有效的数字
+> - `trim`：输入首尾空格过滤
+
+## 过滤器
+
+> 对要显示的数据进行特定格式化后再显示（适用于一些简单逻辑的处理）。
+
+1. 注册过滤器：`Vue.filter(name,callback)` 或 `new Vue{filters:{}}`
+
+2. 使用过滤器：`{{ xxx | 过滤器名}} ` 或  `v-bind:属性 = "xxx | 过滤器名"`
+
+   > 过滤器也可以接收额外参数、多个过滤器也可以串联
+   > 并没有改变原本的数据, 是产生新的对应的数据
+
+## 内置指令
+
+### v-once
+
+v-once所在节点在初次动态渲染后，就视为静态内容了。
+
+以后数据的改变不会引起v-once所在结构的更新，可以用于优化性能。
+
+### v-cloak
+
+> 没有值
+
+本质是一个特殊属性，Vue实例创建完毕并接管容器后，会删掉v-cloak属性。
+使用css配合v-cloak可以解决网速慢时页面展示出{{xxx}}的问题。
+
+### v-html
+
+作用：向指定节点中渲染包含html结构的内容。
+
+与插值语法的区别：
+
+- v-html会替换掉节点中所有的内容，{{xx}}则不会。
+- v-html可以识别html结构。
+
+**严重注意：v-html有安全性问题！**
+
+- **在网站上动态渲染任意HTML是非常危险的，容易导致XSS攻击。**
+- **一定要在可信的内容上使用v-html，永不要用在用户提交的内容上！**
+
+### v-text
+
+作用：向其所在的节点中渲染文本内容。
+
+与插值语法的区别：v-text会替换掉节点中的内容，{{xx}}则不会。
+
+### v-pre
+
+跳过其所在节点的编译过程。
+
+可利用它跳过：没有使用指令语法、没有使用插值语法的节点，会加快编译。
+
+### 其他指令
+
+```txt
+v-bind	: 单向绑定解析表达式, 可简写为 :xxx
+v-model	: 双向数据绑定
+v-for  	: 遍历数组/对象/字符串
+v-on   	: 绑定事件监听, 可简写为@
+v-if 	 	: 条件渲染（动态控制节点是否存存在）
+v-else 	: 条件渲染（动态控制节点是否存存在）
+v-show 	: 条件渲染 (动态控制节点是否展示)
+```
+
+## 自定义指令
+
+1. 定义语法：
+   - 局部指令：
+
+```javascript
+		new Vue({
+			el:'#root',
+			data:{
+				name:'尚硅谷',
+				n:1
+			},
+			directives:{
+				//big函数何时会被调用？1.指令与元素成功绑定时（一上来）。2.指令所在的模板被重新解析时。
+				/* 'big-number'(element,binding){
+					// console.log('big')
+					element.innerText = binding.value * 10
+				}, */
+				big(element,binding){
+					console.log('big',this) //注意此处的this是window
+					// console.log('big')
+					element.innerText = binding.value * 10
+				},
+				fbind:{
+					//指令与元素成功绑定时（一上来）
+					bind(element,binding){
+						element.value = binding.value
+					},
+					//指令所在元素被插入页面时
+					inserted(element,binding){
+						element.focus()
+					},
+					//指令所在的模板被重新解析时
+					update(element,binding){
+						element.value = binding.value
+					}
+				}
+			}
+		})
+```
+
+- 全局指令：
+
+```javascript
+//定义全局指令
+ Vue.directive('fbind',{
+     //指令与元素成功绑定时（一上来）
+     bind(element,binding){
+         element.value = binding.value
+     },
+     //指令所在元素被插入页面时
+     inserted(element,binding){
+         element.focus()
+     },
+     //指令所在的模板被重新解析时
+     update(element,binding){
+         element.value = binding.value
+     }
+ }) 
+```
+
+2. 配置对象中常用的3个回调：
+   - **bind**：指令与元素成功绑定时调用。
+   - **inserted**：指令所在元素被插入页面时调用。
+   - **update**：指令所在模板结构被重新解析时调用。
+
+3. 备注：
+   - **指令定义时不加v-，但使用时要加v-**
+   - **指令名如果是多个单词，要使用kebab-case命名方式，不要用camelCase命名。**
+
+## 生命周期
+
+> 生命周期回调函数、生命周期函数、生命周期钩子。
+>
+> 共有4个节点,8个钩子
+
+是什么：
+
+- Vue在关键时刻帮我们调用的一些特殊名称的函数。
+
+生命周期函数的名字不可更改，但函数的具体内容是程序员根据需求编写的。
+
+生命周期函数中的this指向是vm 或 组件实例对象。
+
+---
+
+常用的生命周期钩子：
+
+- **created**: 网络请求初始化页面
+
+- **mounted**: 发送ajax请求、启动定时器、绑定自定义事件、订阅消息等【初始化操作】。
+- **beforeDestroy**: 清除定时器、解绑自定义事件、取消订阅消息等【收尾工作】。
+  - 释放资源
+
+关于销毁Vue实例
+
+- 销毁后借助Vue开发者工具看不到任何信息。
+- 销毁后自定义事件会失效，但原生DOM事件依然有效。
+- 一般不会在beforeDestroy操作数据，因为即便操作数据，也不会再触发更新流程了。
+
+![image-20210927230435706](https://jianjiandawang.oss-cn-shanghai.aliyuncs.com/Typora/20210927230442.png)
+
+```javascript
+new Vue({
+			el:'#root',
+			// template:`
+			// 	<div>
+			// 		<h2>当前的n值是：{{n}}</h2>
+			// 		<button @click="add">点我n+1</button>
+			// 	</div>
+			// `,
+			data:{
+				n:1
+			},
+			methods: {
+				add(){
+					console.log('add')
+					this.n++
+				},
+				bye(){
+					console.log('bye')
+					this.$destroy()
+				}
+			},
+			watch:{
+				n(){
+					console.log('n变了')
+				}
+			},
+			beforeCreate() {
+				console.log('beforeCreate')
+			},
+			created() {
+				console.log('created')
+			},
+			beforeMount() {
+				console.log('beforeMount')
+			},
+			mounted() {
+				console.log('mounted')
+			},
+			beforeUpdate() {
+				console.log('beforeUpdate')
+			},
+			updated() {
+				console.log('updated')
+			},
+			beforeDestroy() {
+				console.log('beforeDestroy')
+			},
+			destroyed() {
+				console.log('destroyed')
+			},
+		})
+```
+
+
 
